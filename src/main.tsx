@@ -183,7 +183,16 @@ function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: Su
               e.preventDefault();
               if (mode === 'in') void run(() => auth.signIn(email.trim(), password), onDone);
               else if (!kind) setMsg({ text: T.pickType, bad: true });
-              else void run(async () => { await auth.signUp(email.trim(), password, kind); }, onDone);
+              else
+                void run(async () => {
+                  try {
+                    await auth.signUp(email.trim(), password, kind);
+                  } catch (e) {
+                    // Accounts are confirmed automatically on the server; sign straight in.
+                    if (/confirm/i.test(e instanceof Error ? e.message : String(e))) await auth.signIn(email.trim(), password);
+                    else throw e;
+                  }
+                }, onDone);
             }}
           >
             <input className={cls} type="email" autoComplete="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={T.email} value={email} onChange={(e) => setEmail(e.target.value)} id="sb-email" dir="ltr" />
