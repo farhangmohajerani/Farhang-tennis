@@ -273,7 +273,7 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth) {
         }
       }
       return [
-        ...requests.map((r): TeamMember => ({ email: r.email, role: 'coach', pending: true, requested: true, userId: r.user_id })),
+        ...requests.filter((r) => !staff.some((x) => x.user_id === r.user_id)).map((r): TeamMember => ({ email: r.email, role: 'coach', pending: true, requested: true, userId: r.user_id })),
         ...staff.map((s): TeamMember => ({ email: s.email, role: s.role, pending: false, userId: s.user_id })),
         ...invites.map((i): TeamMember => ({ ...i, pending: true })),
       ];
