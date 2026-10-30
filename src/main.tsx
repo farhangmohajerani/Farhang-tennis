@@ -44,13 +44,48 @@ const fa = (() => {
   return navigator.language?.toLowerCase().startsWith('fa');
 })();
 const T = fa
-  ? { title: 'پیشرفت تنیس', sub: 'آکادمی تنیس — ورود مربی‌ها و والدین', email: 'ایمیل', pass: 'رمز عبور (حداقل ۸ کاراکتر)', signIn: 'ورود', signUp: 'ساخت حساب جدید', forgot: 'رمز را فراموش کرده‌ام', sent: 'ایمیل بازیابی رمز فرستاده شد.', newPass: 'رمز جدید', save: 'ذخیرهٔ رمز', toggle: 'English', created: 'حساب ساخته شد. اگر ایمیل تأیید آمد، روی لینکش بزنید و بعد وارد شوید.' }
-  : { title: 'Tennis Progress', sub: 'Tennis academy — sign in for coaches and parents', email: 'Email', pass: 'Password (8+ characters)', signIn: 'Sign in', signUp: 'Create an account', forgot: 'Forgot password', sent: 'Password reset email sent.', newPass: 'New password', save: 'Save password', toggle: 'فارسی', created: 'Account created. If a confirmation email arrives, open its link, then sign in.' };
+  ? {
+      title: 'پیشرفت تنیس', sub: 'آکادمی تنیس — ورود مربی‌ها و والدین', email: 'ایمیل', pass: 'رمز عبور (حداقل ۸ کاراکتر)',
+      signIn: 'ورود', signUp: 'ساخت حساب جدید', forgot: 'رمز را فراموش کرده‌ام', show: 'نمایش رمز', hide: 'پنهان کردن رمز',
+      sent: 'ایمیل بازیابی رمز فرستاده شد. روی لینک داخل ایمیل بزنید تا رمز جدید بگذارید.', newPass: 'رمز جدید (حداقل ۸ کاراکتر)',
+      newPassTitle: 'رمز جدید بگذارید', save: 'ذخیرهٔ رمز و ورود', toggle: 'English',
+      checkEmail: 'حساب ساخته شد. یک ایمیل تأیید برایتان فرستادیم؛ روی لینکش بزنید تا وارد شوید.',
+      welcomeTitle: 'تبریک! 🎾', welcomeText: 'ایمیل شما تأیید شد و حسابتان آماده است.', enter: 'ورود به اپ',
+      badLogin: 'ایمیل یا رمز اشتباه است. اگر رمز را فراموش کرده‌اید، «رمز را فراموش کرده‌ام» را بزنید.',
+      exists: 'با این ایمیل قبلاً حساب ساخته شده. «ورود» را بزنید.', notConfirmed: 'ایمیل هنوز تأیید نشده. روی لینک ایمیل تأیید بزنید.',
+      expired: 'این لینک منقضی شده یا قبلاً استفاده شده. دوباره «رمز را فراموش کرده‌ام» را بزنید یا وارد شوید.',
+      tooMany: 'تعداد درخواست‌ها زیاد بود. چند دقیقه صبر کنید و دوباره امتحان کنید.', passwordSaved: 'رمز ذخیره شد.',
+    }
+  : {
+      title: 'Tennis Progress', sub: 'Tennis academy — sign in for coaches and parents', email: 'Email', pass: 'Password (8+ characters)',
+      signIn: 'Sign in', signUp: 'Create an account', forgot: 'Forgot password', show: 'Show password', hide: 'Hide password',
+      sent: 'Password reset email sent. Open the link in it to choose a new password.', newPass: 'New password (8+ characters)',
+      newPassTitle: 'Choose a new password', save: 'Save password and continue', toggle: 'فارسی',
+      checkEmail: 'Account created. We sent you a confirmation email — open its link to sign in.',
+      welcomeTitle: 'Congratulations! 🎾', welcomeText: 'Your email is confirmed and your account is ready.', enter: 'Open the app',
+      badLogin: 'Wrong email or password. If you forgot your password, tap “Forgot password”.',
+      exists: 'An account with this email already exists. Tap “Sign in”.', notConfirmed: 'Your email is not confirmed yet. Open the link in the confirmation email.',
+      expired: 'This link has expired or was already used. Tap “Forgot password” again, or sign in.',
+      tooMany: 'Too many attempts. Wait a few minutes and try again.', passwordSaved: 'Password saved.',
+    };
 
-function SignIn({ auth, onDone, recovery }: { auth: SupabaseAuth; onDone: () => void; recovery?: boolean }) {
+function friendly(raw: string): string {
+  if (/invalid login credentials/i.test(raw)) return T.badLogin;
+  if (/already registered|already exists/i.test(raw)) return T.exists;
+  if (/not confirmed/i.test(raw)) return T.notConfirmed;
+  if (/rate limit|too many|429/i.test(raw)) return T.tooMany;
+  if (/confirm/i.test(raw)) return T.checkEmail;
+  return raw;
+}
+
+type Screen = 'signin' | 'recovery' | 'welcome';
+
+function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: SupabaseAuth; onDone: () => void; screen?: Screen; notice?: string }) {
+  const [screen] = useState<Screen>(initial);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [msg, setMsg] = useState<{ text: string; bad: boolean } | null>(null);
+  const [show, setShow] = useState(false);
+  const [msg, setMsg] = useState<{ text: string; bad: boolean } | null>(notice ? { text: notice, bad: true } : null);
   const [busy, setBusy] = useState(false);
   const run = async (fn: () => Promise<unknown>, after?: () => void) => {
     setBusy(true);
@@ -59,32 +94,46 @@ function SignIn({ auth, onDone, recovery }: { auth: SupabaseAuth; onDone: () => 
       await fn();
       after?.();
     } catch (e) {
-      const text = e instanceof Error ? e.message : String(e);
-      if (/confirm/i.test(text)) setMsg({ text: T.created, bad: false });
-      else setMsg({ text, bad: true });
+      const text = friendly(e instanceof Error ? e.message : String(e));
+      setMsg({ text, bad: text !== T.checkEmail });
     } finally {
       setBusy(false);
     }
   };
   const cls = 'w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-ink';
+  const primary = 'h-11 rounded-full bg-accent font-semibold text-accent-ink disabled:opacity-40';
+  const note = msg && (
+    <p className={msg.bad ? 'text-sm font-semibold text-bad' : 'text-sm font-semibold text-good'} role="alert" data-testid="auth-message">
+      {msg.text}
+    </p>
+  );
   return (
     <div className="gutter mx-auto flex min-h-[100dvh] max-w-sm flex-col justify-center gap-4" dir={fa ? 'rtl' : 'ltr'}>
       <div>
         <h1 className="font-display text-4xl">{T.title}</h1>
         <p className="text-sm text-muted">{T.sub}</p>
       </div>
-      {recovery ? (
+      {screen === 'welcome' ? (
+        <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-5" data-testid="welcome">
+          <h2 className="font-display text-3xl">{T.welcomeTitle}</h2>
+          <p>{T.welcomeText}</p>
+          <button type="button" className={primary} onClick={onDone}>{T.enter}</button>
+        </div>
+      ) : screen === 'recovery' ? (
         <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); void run(() => auth.updatePassword(password), onDone); }}>
-          <input className={cls} type="password" autoComplete="new-password" placeholder={T.newPass} value={password} onChange={(e) => setPassword(e.target.value)} id="sb-newpass" />
-          {msg && <p className={msg.bad ? 'text-sm font-semibold text-bad' : 'text-sm font-semibold text-good'}>{msg.text}</p>}
-          <button type="submit" disabled={busy || password.length < 8} className="h-11 rounded-full bg-accent font-semibold text-accent-ink disabled:opacity-40">{T.save}</button>
+          <h2 className="font-display text-2xl">{T.newPassTitle}</h2>
+          <input className={cls} type={show ? 'text' : 'password'} autoComplete="new-password" placeholder={T.newPass} value={password} onChange={(e) => setPassword(e.target.value)} id="sb-newpass" dir="ltr" />
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> {T.show}</label>
+          {note}
+          <button type="submit" disabled={busy || password.length < 8} className={primary} data-testid="save-new-password">{T.save}</button>
         </form>
       ) : (
         <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); void run(() => auth.signIn(email.trim(), password), onDone); }}>
-          <input className={cls} type="email" autoComplete="email" placeholder={T.email} value={email} onChange={(e) => setEmail(e.target.value)} id="sb-email" dir="ltr" />
-          <input className={cls} type="password" autoComplete="current-password" placeholder={T.pass} value={password} onChange={(e) => setPassword(e.target.value)} id="sb-password" dir="ltr" />
-          {msg && <p className={msg.bad ? 'text-sm font-semibold text-bad' : 'text-sm font-semibold text-good'} role="alert">{msg.text}</p>}
-          <button type="submit" disabled={busy || !email || !password} className="h-11 rounded-full bg-accent font-semibold text-accent-ink disabled:opacity-40" data-testid="sign-in">{T.signIn}</button>
+          <input className={cls} type="email" autoComplete="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={T.email} value={email} onChange={(e) => setEmail(e.target.value)} id="sb-email" dir="ltr" />
+          <input className={cls} type={show ? 'text' : 'password'} autoComplete="current-password" autoCapitalize="none" autoCorrect="off" placeholder={T.pass} value={password} onChange={(e) => setPassword(e.target.value)} id="sb-password" dir="ltr" />
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> {T.show}</label>
+          {note}
+          <button type="submit" disabled={busy || !email || !password} className={primary} data-testid="sign-in">{T.signIn}</button>
           <button
             type="button"
             disabled={busy || !email || password.length < 8}
@@ -94,7 +143,7 @@ function SignIn({ auth, onDone, recovery }: { auth: SupabaseAuth; onDone: () => 
           >
             {T.signUp}
           </button>
-          <button type="button" disabled={busy || !email} className="text-sm font-semibold text-accent disabled:opacity-40" onClick={() => void run(() => auth.resetPassword(email.trim()), () => setMsg({ text: T.sent, bad: false }))}>
+          <button type="button" disabled={busy || !email} className="text-sm font-semibold text-accent disabled:opacity-40" data-testid="forgot" onClick={() => void run(() => auth.resetPassword(email.trim()), () => setMsg({ text: T.sent, bad: false }))}>
             {T.forgot}
           </button>
         </form>
@@ -168,13 +217,21 @@ const root = createRoot(document.getElementById('root')!);
   const cfg = supabaseConfig();
   if (cfg) {
     const auth = new SupabaseAuth(cfg);
-    const isRecovery = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('type') === 'recovery';
+    const h = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const linkType = h.get('type');
+    const linkError = h.get('error_code') || h.get('error');
+    if (linkError) history.replaceState(null, '', window.location.pathname + window.location.search);
     const fromLink = auth.fromUrl();
-    const go = () => void startSupabase(cfg, auth).catch((e) => {
-      console.error(e);
-      root.render(<SignIn auth={auth} onDone={go} />);
-    });
-    if (fromLink && isRecovery) root.render(<SignIn auth={auth} onDone={go} recovery />);
+    const go = () => {
+      window.location.hash = '';
+      void startSupabase(cfg, auth).catch((e) => {
+        console.error(e);
+        root.render(<SignIn auth={auth} onDone={go} />);
+      });
+    };
+    if (linkError) root.render(<SignIn auth={auth} onDone={go} notice={T.expired} />);
+    else if (fromLink && linkType === 'recovery') root.render(<SignIn auth={auth} onDone={go} screen="recovery" />);
+    else if (fromLink && (linkType === 'signup' || linkType === 'invite' || linkType === 'email_change')) root.render(<SignIn auth={auth} onDone={go} screen="welcome" />);
     else if (await auth.refresh()) go();
     else root.render(<SignIn auth={auth} onDone={go} />);
     return;

@@ -1,3 +1,3 @@
 node_modules
+dist
 .env
-e2e/.sb-build

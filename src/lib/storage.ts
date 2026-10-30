@@ -149,8 +149,13 @@ export class SupabaseAuth {
     return this.call('token?grant_type=password', { email, password });
   }
 
+  /** Where links in emails (confirm, reset password) send people back to: this page. */
+  static appUrl(): string {
+    return window.location.origin + window.location.pathname;
+  }
+
   signUp(email: string, password: string) {
-    return this.call('signup', { email, password });
+    return this.call(`signup?redirect_to=${encodeURIComponent(SupabaseAuth.appUrl())}`, { email, password });
   }
 
   private inflight: Promise<SupabaseSession | null> | null = null;
@@ -174,10 +179,10 @@ export class SupabaseAuth {
   }
 
   async resetPassword(email: string): Promise<void> {
-    const res = await fetch(`${this.cfg.url}/auth/v1/recover`, {
+    const res = await fetch(`${this.cfg.url}/auth/v1/recover?redirect_to=${encodeURIComponent(SupabaseAuth.appUrl())}`, {
       method: 'POST',
       headers: { apikey: this.cfg.anonKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, redirect_to: window.location.href.split('#')[0] }),
+      body: JSON.stringify({ email }),
     });
     if (!res.ok) throw new Error(`Could not send the email (${res.status})`);
   }

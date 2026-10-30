@@ -61,8 +61,13 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
       const u = users.get(String(json.email).toLowerCase());
       return u && u.password === json.password ? send(200, issue(u)) : send(400, { error_description: 'Invalid login credentials' });
     }
+    if (p === '/auth/v1/recover') return send(200, {});
     const u = who(req);
     if (!u) return send(401, { message: 'JWT required' });
+    if (p === '/auth/v1/user' && req.method === 'PUT') {
+      u.password = json.password;
+      return send(200, { id: u.id, email: u.email });
+    }
     if (p.startsWith('/rest/v1/rpc/')) {
       const fn = p.split('/').pop();
       if (fn === 'claim_staff') {
@@ -134,5 +139,6 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
     }
     send(404, { message: 'not found ' + p });
   });
-  return new Promise((r) => server.listen(port, () => r({ server, docs, staff, invites })));
+  const linkFor = (email) => issue(users.get(email));
+  return new Promise((r) => server.listen(port, () => r({ server, docs, staff, invites, linkFor })));
 }

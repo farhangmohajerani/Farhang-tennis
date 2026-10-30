@@ -19,12 +19,12 @@ const step = async (name, fn) => {
   passed++;
   console.log('  ✓ ' + name);
 };
-async function person() {
+async function person(url = URL_) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await ctx.route(/fonts\./, (r) => r.abort());
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('PAGE ERROR', e));
-  await page.goto(URL_);
+  await page.goto(url);
   return page;
 }
 async function signUp(page, email) {
@@ -106,6 +106,36 @@ await step('reload keeps the coach signed in with data', async () => {
   await coach.getByText('Alya').first().waitFor();
   await coach.getByTestId('sign-out').click();
   await coach.getByTestId('sign-in').waitFor();
+});
+await step('wrong password shows a clear message', async () => {
+  const p = await person();
+  await p.fill('#sb-email', OWNER);
+  await p.fill('#sb-password', 'wrongpassword');
+  await p.getByTestId('sign-in').click();
+  await p.getByTestId('auth-message').getByText(/Wrong email or password/).waitFor();
+});
+await step('confirmation link opens a welcome page, then the app', async () => {
+  const s = mock.linkFor(OWNER);
+  const p = await person(`${URL_}#access_token=${s.access_token}&refresh_token=${s.refresh_token}&expires_at=${s.expires_at}&type=signup`);
+  await p.getByTestId('welcome').getByText('Congratulations').waitFor();
+  await p.getByRole('button', { name: 'Open the app' }).click();
+  await p.getByText('Alya').first().waitFor();
+});
+await step('reset link asks for a new password, which then works for sign-in', async () => {
+  const s = mock.linkFor('parent@example.com');
+  const p = await person(`${URL_}#access_token=${s.access_token}&refresh_token=${s.refresh_token}&expires_at=${s.expires_at}&type=recovery`);
+  await p.fill('#sb-newpass', 'newpassword9');
+  await p.getByTestId('save-new-password').click();
+  await p.getByText('Alya').first().waitFor();
+  const q = await person();
+  await q.fill('#sb-email', 'parent@example.com');
+  await q.fill('#sb-password', 'newpassword9');
+  await q.getByTestId('sign-in').click();
+  await q.getByText('Alya').first().waitFor();
+});
+await step('an expired email link shows a helpful message', async () => {
+  const p = await person(`${URL_}#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid`);
+  await p.getByTestId('auth-message').getByText(/expired/).waitFor();
 });
 console.log(`\n${passed} passed`);
 await browser.close();
