@@ -1,0 +1,215 @@
+/* Layout concept: a club scoreboard — navy band header, white court surfaces divided by hairline
+   "court lines", muted cyan for interactive accents, tabular numerals for every count. */
+@import "tailwindcss";
+
+:root {
+  --tp-bg: #f4f7fa;
+  --tp-surface: #ffffff;
+  --tp-sunken: #eaf0f5;
+  --tp-ink: #0c1f38;
+  --tp-muted: #56677d;
+  --tp-line: #d6dfe8;
+  --tp-band: #0c1f38;
+  --tp-band-ink: #f4f7fa;
+  --tp-band-muted: #9fb4c8;
+  --tp-accent: #2f7f8c;
+  --tp-accent-ink: #ffffff;
+  --tp-accent-soft: #dceef1;
+  --tp-good: #2b7d52;
+  --tp-good-soft: #dff1e6;
+  --tp-warn: #9a6512;
+  --tp-warn-soft: #f8ecd6;
+  --tp-bad: #a93d35;
+  --tp-bad-soft: #f8e1de;
+  --tp-star: #c79a2c;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --tp-bg: #07111e;
+    --tp-surface: #0e1c30;
+    --tp-sunken: #0a1626;
+    --tp-ink: #e6edf5;
+    --tp-muted: #94a6bb;
+    --tp-line: #1f3149;
+    --tp-band: #040b15;
+    --tp-band-ink: #e6edf5;
+    --tp-band-muted: #8ea4ba;
+    --tp-accent: #7cc3ce;
+    --tp-accent-ink: #062027;
+    --tp-accent-soft: #123139;
+    --tp-good: #6cc795;
+    --tp-good-soft: #10301f;
+    --tp-warn: #e3ac55;
+    --tp-warn-soft: #33260f;
+    --tp-bad: #ec8a80;
+    --tp-bad-soft: #3a1714;
+    --tp-star: #e5bd55;
+    color-scheme: dark;
+  }
+}
+:root[data-theme='dark'] {
+  --tp-bg: #07111e;
+  --tp-surface: #0e1c30;
+  --tp-sunken: #0a1626;
+  --tp-ink: #e6edf5;
+  --tp-muted: #94a6bb;
+  --tp-line: #1f3149;
+  --tp-band: #040b15;
+  --tp-band-ink: #e6edf5;
+  --tp-band-muted: #8ea4ba;
+  --tp-accent: #7cc3ce;
+  --tp-accent-ink: #062027;
+  --tp-accent-soft: #123139;
+  --tp-good: #6cc795;
+  --tp-good-soft: #10301f;
+  --tp-warn: #e3ac55;
+  --tp-warn-soft: #33260f;
+  --tp-bad: #ec8a80;
+  --tp-bad-soft: #3a1714;
+  --tp-star: #e5bd55;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--tp-bg);
+  --color-surface: var(--tp-surface);
+  --color-sunken: var(--tp-sunken);
+  --color-ink: var(--tp-ink);
+  --color-muted: var(--tp-muted);
+  --color-line: var(--tp-line);
+  --color-band: var(--tp-band);
+  --color-band-ink: var(--tp-band-ink);
+  --color-band-muted: var(--tp-band-muted);
+  --color-accent: var(--tp-accent);
+  --color-accent-ink: var(--tp-accent-ink);
+  --color-accent-soft: var(--tp-accent-soft);
+  --color-good: var(--tp-good);
+  --color-good-soft: var(--tp-good-soft);
+  --color-warn: var(--tp-warn);
+  --color-warn-soft: var(--tp-warn-soft);
+  --color-bad: var(--tp-bad);
+  --color-bad-soft: var(--tp-bad-soft);
+  --color-star: var(--tp-star);
+  --font-display: 'Instrument Serif', 'Vazirmatn', Georgia, 'Times New Roman', serif;
+  --font-body: 'Manrope', 'Vazirmatn', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  margin: 0;
+  background: var(--tp-bg);
+  color: var(--tp-ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+[dir='rtl'] body {
+  font-family: 'Vazirmatn', var(--font-body);
+}
+[dir='rtl'] .font-display {
+  font-family: 'Vazirmatn', var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0;
+}
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+.num {
+  font-variant-numeric: tabular-nums;
+}
+.gutter {
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--tp-muted);
+}
+[dir='rtl'] .eyebrow {
+  letter-spacing: 0;
+  font-size: 12px;
+}
+/* court-line divider: a centre service line meeting a baseline */
+.court-rule {
+  height: 1px;
+  background: var(--tp-line);
+  position: relative;
+}
+.court-rule::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -6px;
+  width: 1px;
+  height: 6px;
+  background: var(--tp-line);
+}
+:focus-visible {
+  outline: 2px solid var(--tp-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  color: inherit;
+}
+/* iOS Safari zooms inputs under 16px */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+@media (min-width: 768px) {
+  input,
+  select,
+  textarea {
+    font-size: 14px;
+  }
+}
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0 0 auto;
+  height: env(safe-area-inset-top, 0px);
+  z-index: 40;
+  background: var(--tp-band);
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+@keyframes tp-in {
+  from {
+    transform: translateY(6px);
+    opacity: 0.4;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.toast-in {
+  animation: tp-in 0.18s ease-out;
+}
+/* Drill content is English in v1: let each text run pick its own direction inside the RTL layout
+   so Latin text keeps correct punctuation order ("4. Deep topspin", not "Deep topspin .4"). */
+[dir='rtl'] :is(h1, h2, h3, h4, p, li, a, span, dd, dt, td, th, blockquote, option, label) {
+  unicode-bidi: plaintext;
+}
