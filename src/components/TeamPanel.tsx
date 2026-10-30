@@ -38,7 +38,28 @@ export function TeamPanel() {
           <li key={m.email + m.role} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
             <span className="min-w-0 flex-1 truncate">{m.email}</span>
             <Badge tone={m.role === 'admin' ? 'band' : 'accent'}>{t(m.role === 'admin' ? 'role_admin' : 'role_coach')}</Badge>
-            {m.pending && <Badge tone="warn">{t('pendingInvite')}</Badge>}
+            {m.pending && !m.requested && <Badge tone="warn">{t('pendingInvite')}</Badge>}
+            {m.requested && (
+              <>
+                <Badge tone="warn">{t('wantsAccess')}</Badge>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  data-testid={`approve-${m.email}`}
+                  onClick={async () => {
+                    try {
+                      await team.approve(m);
+                      toast(t('approved', { email: m.email }));
+                      load();
+                    } catch (e) {
+                      toast(e instanceof Error ? e.message : String(e), 'error');
+                    }
+                  }}
+                >
+                  {t('approve')}
+                </Button>
+              </>
+            )}
             {m.email !== team.myEmail && (
               <ConfirmButton
                 label={t('remove')}
@@ -71,5 +92,22 @@ export function TeamPanel() {
         </div>
       </form>
     </Card>
+  );
+}
+
+/** Admin: a notice on the dashboard when coaches are waiting for approval. */
+export function CoachRequestsBanner() {
+  const { t, state } = useStore();
+  const team = getTeam();
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (!team || state.settings.role !== 'admin') return;
+    team.list().then((ms) => setN(ms.filter((m) => m.requested).length)).catch(() => undefined);
+  }, [team, state.settings.role]);
+  if (!n) return null;
+  return (
+    <a href="#admin" className="mb-4 flex items-center gap-2 rounded-2xl border border-warn bg-warn-soft p-3 text-sm font-semibold text-warn" data-testid="requests-banner">
+      {t('coachRequests', { n })} →
+    </a>
   );
 }

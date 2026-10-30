@@ -154,8 +154,21 @@ export class SupabaseAuth {
     return window.location.origin + window.location.pathname;
   }
 
-  signUp(email: string, password: string) {
-    return this.call(`signup?redirect_to=${encodeURIComponent(SupabaseAuth.appUrl())}`, { email, password });
+  signUp(email: string, password: string, accountType: 'coach' | 'parent' = 'parent') {
+    return this.call(`signup?redirect_to=${encodeURIComponent(SupabaseAuth.appUrl())}`, { email, password, data: { account_type: accountType } });
+  }
+
+  /** account_type chosen at sign-up (from the token's user_metadata). */
+  accountType(): 'coach' | 'parent' | null {
+    const s = this.current();
+    if (!s) return null;
+    try {
+      const payload = JSON.parse(atob(s.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      const t = payload.user_metadata?.account_type;
+      return t === 'coach' || t === 'parent' ? t : null;
+    } catch {
+      return null;
+    }
   }
 
   private inflight: Promise<SupabaseSession | null> | null = null;

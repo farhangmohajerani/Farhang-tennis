@@ -54,7 +54,8 @@ export class SupabaseDocDb implements DbLike {
 
   async rpc<T>(fn: string, args: Record<string, unknown> = {}): Promise<T> {
     const res = await this.req(`rpc/${fn}`, { method: 'POST', body: JSON.stringify(args) });
-    return (await res.json()) as T;
+    const text = await res.text();
+    return (text ? JSON.parse(text) : null) as T;
   }
 
   /** Read every visible row (RLS decides which), page by page. */
@@ -163,7 +164,7 @@ export class SupabaseDocDb implements DbLike {
 }
 
 /** Role comes from the staff table: admin = owner, coach = editor, anyone else = parent. */
-export async function supabaseUser(db: SupabaseDocDb, auth: SupabaseAuth): Promise<UserLike & { role: string | null; email: string }> {
+export async function supabaseUser(db: SupabaseDocDb, auth: SupabaseAuth): Promise<UserLike & { role: string | null; email: string; pendingCoach: boolean }> {
   const s = await auth.refresh();
   let role: string | null = null;
   try {
@@ -171,8 +172,20 @@ export async function supabaseUser(db: SupabaseDocDb, auth: SupabaseAuth): Promi
   } catch (e) {
     console.warn('claim_staff failed', e);
   }
+  // A coach who signed up without an invite asks the admin for access and waits.
+  let pendingCoach = false;
+  if (!role && auth.accountType() === 'coach') {
+    try {
+      await db.rpc('request_coach');
+      pendingCoach = true;
+    } catch (e) {
+      console.warn('request_coach failed', e);
+      pendingCoach = true;
+    }
+  }
   return {
     role,
+    pendingCoach,
     email: s?.user.email ?? '',
     isOwner: async () => role === 'admin',
     canEdit: async () => role === 'admin' || role === 'coach',

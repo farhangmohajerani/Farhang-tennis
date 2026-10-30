@@ -8,6 +8,7 @@ import { findConflicts, todayISO } from '../lib/schedule';
 import { Badge, Card, Empty, Icon, KpiTile, PageHeader, SectionTitle } from '../components/ui';
 import { PlayerForm } from '../components/Players';
 import { ParentConnect } from '../components/ParentLink';
+import { CoachRequestsBanner } from '../components/TeamPanel';
 
 export function Dashboard() {
   const { state, t, lang, adapter } = useStore();
@@ -52,6 +53,7 @@ export function Dashboard() {
   return (
     <div>
       <PageHeader eyebrow={plan?.name} title={t('nav_dashboard')} />
+      <CoachRequestsBanner />
 
       <div className="grid gap-5 lg:grid-cols-[1.5fr_1fr]">
         <Card className="overflow-hidden">

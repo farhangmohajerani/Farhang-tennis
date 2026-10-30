@@ -27,16 +27,25 @@ async function person(url = URL_) {
   await page.goto(url);
   return page;
 }
-async function signUp(page, email) {
+async function signUp(page, email, kind = 'parent') {
+  await page.getByTestId('tab-up').click();
+  await page.getByTestId(`kind-${kind}`).click();
   await page.fill('#sb-email', email);
   await page.fill('#sb-password', 'password123');
   await page.getByTestId('sign-up').click();
   await page.locator('main').waitFor();
 }
 
+async function signUpRaw(page, email, kind) {
+  await page.getByTestId('tab-up').click();
+  await page.getByTestId(`kind-${kind}`).click();
+  await page.fill('#sb-email', email);
+  await page.fill('#sb-password', 'password123');
+  await page.getByTestId('sign-up').click();
+}
 const owner = await person();
 await step('owner signs up and becomes admin', async () => {
-  await signUp(owner, OWNER);
+  await signUp(owner, OWNER, 'coach');
   await owner.getByText('Add your first player').waitFor();
   assert.equal(await owner.locator('#role-select option').count(), 3);
   assert.equal(mock.staff.size, 1);
@@ -52,7 +61,7 @@ await step('owner adds a player and invites a coach', async () => {
 });
 const coach = await person();
 await step('invited coach signs up with that email and sees the player', async () => {
-  await signUp(coach, 'coach@example.com');
+  await signUp(coach, 'coach@example.com', 'coach');
   await coach.getByText('Alya').first().waitFor();
   assert.equal(await coach.locator('#role-select option').count(), 2);
 });
@@ -136,6 +145,26 @@ await step('reset link asks for a new password, which then works for sign-in', a
 await step('an expired email link shows a helpful message', async () => {
   const p = await person(`${URL_}#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid`);
   await p.getByTestId('auth-message').getByText(/expired/).waitFor();
+});
+await step('sign-up asks coach or parent before creating the account', async () => {
+  const p = await person();
+  await p.getByTestId('tab-up').click();
+  await p.fill('#sb-email', 'someone@example.com');
+  await p.fill('#sb-password', 'password123');
+  await p.getByTestId('sign-up').click();
+  await p.getByTestId('auth-message').getByText(/coach or a parent/).waitFor();
+});
+await step('an uninvited coach waits for approval; the admin approves; the coach gets in', async () => {
+  const c2 = await person();
+  await signUpRaw(c2, 'newcoach@example.com', 'coach');
+  await c2.getByTestId('pending-coach').waitFor();
+  await owner.goto(URL_ + '#dashboard');
+  await owner.reload();
+  await owner.getByTestId('requests-banner').click();
+  await owner.getByTestId('approve-newcoach@example.com').click();
+  await owner.getByText(/newcoach@example.com is now a coach/).waitFor();
+  await c2.reload();
+  await c2.getByText('Alya').first().waitFor();
 });
 console.log(`\n${passed} passed`);
 await browser.close();

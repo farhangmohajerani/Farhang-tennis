@@ -159,12 +159,14 @@ h3 {
   outline-offset: 2px;
   border-radius: 6px;
 }
-input,
-select,
-textarea,
-button {
-  font: inherit;
-  color: inherit;
+@layer base {
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+    color: inherit;
+  }
 }
 /* iOS Safari zooms inputs under 16px */
 input,

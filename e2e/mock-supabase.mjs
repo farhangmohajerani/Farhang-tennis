@@ -13,6 +13,7 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
   const invites = new Map([[ownerEmail, { email: ownerEmail, role: 'admin' }]]);
   const docs = new Map(); // path -> {path, data, updated_at}
   const codes = new Map(); // user_id -> code
+  const requests = new Map(); // user_id -> {user_id, email}
   let clock = 0;
   const stamp = () => new Date(Date.UTC(2026, 0, 1) + ++clock * 1000).toISOString();
 
@@ -24,7 +25,7 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
   const issue = (u) => {
     const t = crypto.randomBytes(16).toString('hex');
     tokens.set(t, u);
-    const payload = Buffer.from(JSON.stringify({ sub: u.id, email: u.email, exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url');
+    const payload = Buffer.from(JSON.stringify({ sub: u.id, email: u.email, user_metadata: u.meta ?? {}, exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url');
     return { access_token: `x.${payload}.${t}`, refresh_token: t, expires_at: Math.floor(Date.now() / 1000) + 3600, user: { id: u.id, email: u.email } };
   };
   const who = (req) => {
@@ -49,7 +50,7 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
     if (p === '/auth/v1/signup') {
       const email = String(json.email).toLowerCase();
       if (users.has(email)) return send(422, { msg: 'User already registered' });
-      const u = { id: crypto.randomUUID(), email, password: json.password };
+      const u = { id: crypto.randomUUID(), email, password: json.password, meta: json.data ?? {} };
       users.set(email, u);
       return send(200, issue(u));
     }
@@ -77,6 +78,17 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
           invites.delete(u.email);
         }
         return send(200, role(u));
+      }
+      if (fn === 'request_coach') {
+        if (!role(u)) requests.set(u.id, { user_id: u.id, email: u.email });
+        return send(204);
+      }
+      if (fn === 'approve_coach') {
+        if (role(u) !== 'admin') return send(400, { message: 'Only admins can approve coaches' });
+        const r = requests.get(json.p_user);
+        if (r) staff.set(r.user_id, { user_id: r.user_id, email: r.email, role: json.p_role ?? 'coach' });
+        requests.delete(json.p_user);
+        return send(204);
       }
       if (fn === 'my_pair_code') {
         if (!codes.has(u.id)) codes.set(u.id, String(100000 + Math.floor(Math.random() * 900000)));
@@ -124,6 +136,14 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
         return send(204);
       }
       return send(403, {});
+    }
+    if (p === '/rest/v1/staff_requests') {
+      if (role(u) !== 'admin') return req.method === 'GET' ? send(200, []) : send(403, {});
+      if (req.method === 'GET') return send(200, [...requests.values()]);
+      if (req.method === 'DELETE') {
+        requests.delete(url.searchParams.get('user_id').replace(/^eq\./, ''));
+        return send(204);
+      }
     }
     if (p === '/rest/v1/staff_invites') {
       if (role(u) !== 'admin') return req.method === 'GET' ? send(200, []) : send(403, { message: 'row-level security' });

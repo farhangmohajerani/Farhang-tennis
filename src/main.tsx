@@ -55,6 +55,11 @@ const T = fa
       exists: 'با این ایمیل قبلاً حساب ساخته شده. «ورود» را بزنید.', notConfirmed: 'ایمیل هنوز تأیید نشده. روی لینک ایمیل تأیید بزنید.',
       expired: 'این لینک منقضی شده یا قبلاً استفاده شده. دوباره «رمز را فراموش کرده‌ام» را بزنید یا وارد شوید.',
       tooMany: 'تعداد درخواست‌ها زیاد بود. چند دقیقه صبر کنید و دوباره امتحان کنید.', passwordSaved: 'رمز ذخیره شد.',
+      tabSignIn: 'ورود', tabSignUp: 'ساخت حساب', whoAreYou: 'شما کدام هستید؟', coach: 'مربی', parent: 'والدین / خانواده',
+      coachHint: 'مدیر آکادمی باید دسترسی شما را تأیید کند.', parentHint: 'بعد از ثبت‌نام یک کد ۶ رقمی می‌گیرید که به مربی می‌دهید.',
+      pickType: 'اول انتخاب کنید مربی هستید یا والدین.',
+      pendingTitle: 'درخواست شما فرستاده شد', pendingText: 'حساب مربی شما ساخته شد. مدیر آکادمی باید دسترسی‌تان را تأیید کند. بعد از تأیید، همین صفحه را دوباره باز کنید.',
+      checkAgain: 'دوباره بررسی کن', signOut: 'خروج',
     }
   : {
       title: 'Tennis Progress', sub: 'Tennis academy — sign in for coaches and parents', email: 'Email', pass: 'Password (8+ characters)',
@@ -67,6 +72,11 @@ const T = fa
       exists: 'An account with this email already exists. Tap “Sign in”.', notConfirmed: 'Your email is not confirmed yet. Open the link in the confirmation email.',
       expired: 'This link has expired or was already used. Tap “Forgot password” again, or sign in.',
       tooMany: 'Too many attempts. Wait a few minutes and try again.', passwordSaved: 'Password saved.',
+      tabSignIn: 'Sign in', tabSignUp: 'Create account', whoAreYou: 'Who are you?', coach: 'Coach', parent: 'Parent / family',
+      coachHint: 'The academy admin approves coach access.', parentHint: 'After signing up you get a 6-digit code to give to your coach.',
+      pickType: 'First choose whether you are a coach or a parent.',
+      pendingTitle: 'Request sent', pendingText: 'Your coach account is created. The academy admin needs to approve your access. Open this page again once approved.',
+      checkAgain: 'Check again', signOut: 'Sign out',
     };
 
 function friendly(raw: string): string {
@@ -82,6 +92,8 @@ type Screen = 'signin' | 'recovery' | 'welcome';
 
 function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: SupabaseAuth; onDone: () => void; screen?: Screen; notice?: string }) {
   const [screen] = useState<Screen>(initial);
+  const [mode, setMode] = useState<'in' | 'up'>('in');
+  const [kind, setKind] = useState<'coach' | 'parent' | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
@@ -128,25 +140,68 @@ function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: Su
           <button type="submit" disabled={busy || password.length < 8} className={primary} data-testid="save-new-password">{T.save}</button>
         </form>
       ) : (
-        <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); void run(() => auth.signIn(email.trim(), password), onDone); }}>
-          <input className={cls} type="email" autoComplete="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={T.email} value={email} onChange={(e) => setEmail(e.target.value)} id="sb-email" dir="ltr" />
-          <input className={cls} type={show ? 'text' : 'password'} autoComplete="current-password" autoCapitalize="none" autoCorrect="off" placeholder={T.pass} value={password} onChange={(e) => setPassword(e.target.value)} id="sb-password" dir="ltr" />
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> {T.show}</label>
-          {note}
-          <button type="submit" disabled={busy || !email || !password} className={primary} data-testid="sign-in">{T.signIn}</button>
-          <button
-            type="button"
-            disabled={busy || !email || password.length < 8}
-            className="h-11 rounded-full border border-line font-semibold disabled:opacity-40"
-            data-testid="sign-up"
-            onClick={() => void run(async () => { await auth.signUp(email.trim(), password); }, onDone)}
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 rounded-full border border-line bg-surface p-1" role="tablist">
+            {(['in', 'up'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="tab"
+                aria-selected={mode === m}
+                data-testid={`tab-${m}`}
+                onClick={() => { setMode(m); setMsg(null); }}
+                className={mode === m ? 'h-10 rounded-full bg-band font-semibold text-band-ink' : 'h-10 rounded-full font-semibold text-muted'}
+              >
+                {m === 'in' ? T.tabSignIn : T.tabSignUp}
+              </button>
+            ))}
+          </div>
+          {mode === 'up' && (
+            <fieldset className="flex flex-col gap-2">
+              <legend className="mb-1 text-sm font-semibold">{T.whoAreYou}</legend>
+              <div className="grid grid-cols-2 gap-2">
+                {(['coach', 'parent'] as const).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    aria-pressed={kind === k}
+                    data-testid={`kind-${k}`}
+                    onClick={() => setKind(k)}
+                    className={kind === k ? 'rounded-2xl border-2 border-accent bg-accent-soft p-3 text-start' : 'rounded-2xl border-2 border-line bg-surface p-3 text-start'}
+                  >
+                    <span className="block text-2xl" aria-hidden="true">{k === 'coach' ? '🎾' : '👨‍👩‍👧'}</span>
+                    <span className="block font-semibold">{k === 'coach' ? T.coach : T.parent}</span>
+                  </button>
+                ))}
+              </div>
+              {kind && <p className="text-[13px] text-muted">{kind === 'coach' ? T.coachHint : T.parentHint}</p>}
+            </fieldset>
+          )}
+          <form
+            className="flex flex-col gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (mode === 'in') void run(() => auth.signIn(email.trim(), password), onDone);
+              else if (!kind) setMsg({ text: T.pickType, bad: true });
+              else void run(async () => { await auth.signUp(email.trim(), password, kind); }, onDone);
+            }}
           >
-            {T.signUp}
-          </button>
-          <button type="button" disabled={busy || !email} className="text-sm font-semibold text-accent disabled:opacity-40" data-testid="forgot" onClick={() => void run(() => auth.resetPassword(email.trim()), () => setMsg({ text: T.sent, bad: false }))}>
-            {T.forgot}
-          </button>
-        </form>
+            <input className={cls} type="email" autoComplete="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={T.email} value={email} onChange={(e) => setEmail(e.target.value)} id="sb-email" dir="ltr" />
+            <input className={cls} type={show ? 'text' : 'password'} autoComplete={mode === 'in' ? 'current-password' : 'new-password'} autoCapitalize="none" autoCorrect="off" placeholder={T.pass} value={password} onChange={(e) => setPassword(e.target.value)} id="sb-password" dir="ltr" />
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> {T.show}</label>
+            {note}
+            {mode === 'in' ? (
+              <button type="submit" disabled={busy || !email || !password} className={primary} data-testid="sign-in">{T.signIn}</button>
+            ) : (
+              <button type="submit" disabled={busy || !email || password.length < 8} className={primary} data-testid="sign-up">{T.signUp}</button>
+            )}
+            {mode === 'in' && (
+              <button type="button" disabled={busy || !email} className="text-sm font-semibold text-accent disabled:opacity-40" data-testid="forgot" onClick={() => void run(() => auth.resetPassword(email.trim()), () => setMsg({ text: T.sent, bad: false }))}>
+                {T.forgot}
+              </button>
+            )}
+          </form>
+        </div>
       )}
       <button
         type="button"
@@ -167,9 +222,29 @@ function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: Su
   );
 }
 
+function PendingCoach({ email, onSignOut }: { email: string; onSignOut: () => void }) {
+  return (
+    <div className="gutter mx-auto flex min-h-[100dvh] max-w-sm flex-col justify-center gap-4" dir={fa ? 'rtl' : 'ltr'} data-testid="pending-coach">
+      <h1 className="font-display text-4xl">{T.title}</h1>
+      <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-5">
+        <h2 className="font-display text-2xl">{T.pendingTitle}</h2>
+        <p>{T.pendingText}</p>
+        <p className="text-sm text-muted" dir="ltr">{email}</p>
+        <button type="button" className="h-11 rounded-full bg-accent font-semibold text-accent-ink" onClick={() => window.location.reload()}>{T.checkAgain}</button>
+        <button type="button" className="h-11 rounded-full border border-line font-semibold" onClick={onSignOut}>{T.signOut}</button>
+      </div>
+    </div>
+  );
+}
+
 async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth) {
   const db = new SupabaseDocDb(cfg, auth);
   const user = await supabaseUser(db, auth);
+  if (user.pendingCoach) {
+    db.stop();
+    root.render(<PendingCoach email={user.email} onSignOut={() => { auth.signOut(); window.location.reload(); }} />);
+    return;
+  }
   setPairing(rpcPairing((fn, args) => db.rpc(fn, args)));
   const rest = async (path: string, init: RequestInit = {}) => {
     const s = await auth.refresh();
@@ -189,13 +264,29 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth) {
     async list() {
       const staff = (await (await rest('staff?select=user_id,email,role&order=email')).json()) as { user_id: string; email: string; role: 'admin' | 'coach' }[];
       const invites = user.role === 'admin' ? ((await (await rest('staff_invites?select=email,role&order=email')).json()) as { email: string; role: 'admin' | 'coach' }[]) : [];
-      return [...staff.map((s): TeamMember => ({ email: s.email, role: s.role, pending: false, userId: s.user_id })), ...invites.map((i): TeamMember => ({ ...i, pending: true }))];
+      let requests: { user_id: string; email: string }[] = [];
+      if (user.role === 'admin') {
+        try {
+          requests = (await (await rest('staff_requests?select=user_id,email&order=created_at')).json()) as typeof requests;
+        } catch {
+          /* table not set up yet */
+        }
+      }
+      return [
+        ...requests.map((r): TeamMember => ({ email: r.email, role: 'coach', pending: true, requested: true, userId: r.user_id })),
+        ...staff.map((s): TeamMember => ({ email: s.email, role: s.role, pending: false, userId: s.user_id })),
+        ...invites.map((i): TeamMember => ({ ...i, pending: true })),
+      ];
     },
     async invite(email, role) {
       await rest('staff_invites?on_conflict=email', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ email, role }) });
     },
+    async approve(m) {
+      await db.rpc('approve_coach', { p_user: m.userId, p_role: 'coach' });
+    },
     async remove(m) {
-      if (m.pending) await rest(`staff_invites?email=eq.${encodeURIComponent(m.email)}`, { method: 'DELETE' });
+      if (m.requested) await rest(`staff_requests?user_id=eq.${m.userId}`, { method: 'DELETE' });
+      else if (m.pending) await rest(`staff_invites?email=eq.${encodeURIComponent(m.email)}`, { method: 'DELETE' });
       else await rest(`staff?user_id=eq.${m.userId}`, { method: 'DELETE' });
     },
   });
