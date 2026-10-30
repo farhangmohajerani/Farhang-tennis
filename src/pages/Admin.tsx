@@ -9,6 +9,7 @@ import { uid } from '../lib/id';
 import { Badge, Button, Card, ConfirmButton, copyText, cx, downloadText, Empty, Field, inputCls, Modal, PageHeader, SectionTitle } from '../components/ui';
 import { matchesQuery } from './Library';
 import { supabaseConfig } from '../lib/storage';
+import { TeamPanel } from '../components/TeamPanel';
 
 export function Admin() {
   const { state, dispatch, t, lang, toast, resetDemo, adapter } = useStore();
@@ -181,6 +182,8 @@ export function Admin() {
               </div>
             )}
           </Card>
+
+          <TeamPanel />
 
           <ThresholdEditor />
 

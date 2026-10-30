@@ -6,6 +6,7 @@ import { roleKey, type DictKey } from '../lib/i18n';
 import { activePlayer } from '../lib/reducer';
 import { cx, Icon, Toasts } from './ui';
 import { PlayersModal } from './Players';
+import { getTeam } from '../lib/team';
 
 export const NAV: { name: string; key: DictKey; roles: Role[] }[] = [
   { name: 'dashboard', key: 'nav_dashboard', roles: ['parent', 'coach', 'admin'] },
@@ -129,7 +130,15 @@ export function Layout({ route, children }: { route: string; children: ReactNode
             {saveStatus === 'saved' && `✓ ${t('saved')}`}
             {saveStatus === 'error' && <span className="text-bad">{t('syncError', { msg: saveError ?? '' })}</span>}
           </span>
-        </p>
+                  {getTeam() && (
+            <span className="ms-2 inline-flex flex-wrap items-center gap-2">
+              · {t('signedInAs', { email: getTeam()!.myEmail })}
+              <button type="button" className="font-semibold text-accent" onClick={() => getTeam()!.signOut()} data-testid="sign-out">
+                {t('signOutBtn')}
+              </button>
+            </span>
+          )}
+</p>
       </footer>
 
       <nav

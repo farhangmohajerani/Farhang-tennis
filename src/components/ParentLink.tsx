@@ -1,72 +1,42 @@
 /**
- * Connecting a parent to a child, inside claude.ai.
- * The parent opens the shared page (as a Viewer) and sees a 6-digit code; the coach types that
- * code while the parent's page is open. The platform tells the coach's page who is showing the
- * code (their claude.ai id), and the coach links that id to the player. Nothing secret travels:
- * the code only finds the right open page, and the platform, not the page, vouches for the id.
+ * Connecting a parent to a child with a 6-digit code (see lib/pairing.ts for how the code
+ * is issued and resolved on claude.ai and on Supabase).
  */
 import { useEffect, useState } from 'react';
 import { useStore } from '../lib/store';
+import { getPairing } from '../lib/pairing';
 import type { Player } from '../types';
 import { Button, cx, inputCls } from './ui';
-
-type Use = (n: string) => Promise<unknown>;
-const claudeUse = (): Use | null => {
-  const c = (window as unknown as { claude?: { use?: Use } }).claude;
-  return c && typeof c.use === 'function' ? c.use.bind(c) : null;
-};
-interface Peer { by: string | null; isMe: boolean; kind: string; presence: Record<string, unknown> }
-interface Room { presence(p: Record<string, unknown>): Promise<void>; peers(): readonly Peer[] }
-interface UserNs { profiles(ids: string[]): Promise<Record<string, { name: string }>> }
-
-const CODE_KEY = 'tennis-progress:pair-code';
-function pairCode(): string {
-  try {
-    const old = window.sessionStorage.getItem(CODE_KEY);
-    if (old) return old;
-  } catch {
-    /* ignore */
-  }
-  const a = new Uint32Array(1);
-  crypto.getRandomValues(a);
-  const code = String(100000 + (a[0] % 900000));
-  try {
-    window.sessionStorage.setItem(CODE_KEY, code);
-  } catch {
-    /* ignore */
-  }
-  return code;
-}
 
 /** Shown to a parent: their connection code. */
 export function ParentConnect({ compact }: { compact?: boolean }) {
   const { t } = useStore();
-  const [code] = useState(pairCode);
-  const [live, setLive] = useState<boolean | null>(null);
+  const [code, setCode] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const pairing = getPairing();
   useEffect(() => {
-    const use = claudeUse();
-    if (!use) return setLive(false);
     let alive = true;
-    (use('room') as Promise<Room | null>)
-      .then((room) => {
+    if (!pairing) return setFailed(true);
+    pairing
+      .myCode()
+      .then((c) => {
         if (!alive) return;
-        if (!room) return setLive(false);
-        setLive(true);
-        void room.presence({ pair: code }).catch(() => undefined);
+        if (c) setCode(c);
+        else setFailed(true);
       })
-      .catch(() => setLive(false));
+      .catch(() => alive && setFailed(true));
     return () => {
       alive = false;
     };
-  }, [code]);
+  }, [pairing]);
   return (
     <div className={cx('rounded-2xl border border-line bg-surface', compact ? 'p-4' : 'p-6')} data-testid="parent-connect">
       <h2 className="font-display text-2xl">{t('connectTitle')}</h2>
-      <p className="mt-1 max-w-[60ch] text-sm text-muted">{t('connectHelp')}</p>
-      <div className="num mt-4 font-mono text-[40px] font-medium tracking-[0.25em]" data-testid="pair-code" dir="ltr">
-        {code}
+      <p className="mt-1 max-w-[60ch] text-sm text-muted">{pairing && !pairing.needsOpenPage ? t('connectHelpAnytime') : t('connectHelp')}</p>
+      <div className="num mt-4 min-h-[48px] font-mono text-[40px] font-medium tracking-[0.25em]" data-testid="pair-code" dir="ltr">
+        {code ?? (failed ? '' : '······')}
       </div>
-      {live === false && <p className="mt-2 text-[13px] font-semibold text-warn">{t('connectUnavailable')}</p>}
+      {failed && <p className="mt-2 text-[13px] font-semibold text-warn">{t('connectUnavailable')}</p>}
     </div>
   );
 }
@@ -75,26 +45,32 @@ export function ParentConnect({ compact }: { compact?: boolean }) {
 export function ParentLinks({ player }: { player: Player }) {
   const { dispatch, t, toast } = useStore();
   const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
   const [names, setNames] = useState<Record<string, string>>({});
   const ids = player.parentIds ?? [];
   const idsKey = ids.join(',');
+  const pairing = getPairing();
   useEffect(() => {
-    const use = claudeUse();
-    if (!use || !ids.length) return;
-    (use('user') as Promise<UserNs | null>).then((u) => u?.profiles(ids).then((ps) => setNames(Object.fromEntries(ids.map((id) => [id, ps[id]?.name || ''])))));
+    if (!pairing || !ids.length) return;
+    pairing.names(ids).then(setNames).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idsKey]);
+  }, [idsKey, pairing]);
 
   const connect = async () => {
-    const use = claudeUse();
-    const room = use ? ((await use('room').catch(() => null)) as Room | null) : null;
-    if (!room) return toast(t('connectUnavailable'), 'error');
-    const peer = room.peers().find((p) => p.kind === 'viewer' && !p.isMe && p.by && p.presence?.pair === code.trim());
-    if (!peer?.by) return toast(t('codeNotFound'), 'warn');
-    if (ids.includes(peer.by)) return toast(t('parentAlready'), 'warn');
-    dispatch({ type: 'upsertPlayer', player: { ...player, parentIds: [...ids, peer.by] } });
-    setCode('');
-    toast(t('parentConnected', { name: player.name }));
+    if (!pairing) return toast(t('connectUnavailable'), 'error');
+    setBusy(true);
+    try {
+      const id = await pairing.resolve(code.trim());
+      if (!id) return toast(pairing.needsOpenPage ? t('codeNotFound') : t('codeNotFoundAnytime'), 'warn');
+      if (ids.includes(id)) return toast(t('parentAlready'), 'warn');
+      dispatch({ type: 'upsertPlayer', player: { ...player, parentIds: [...ids, id] } });
+      setCode('');
+      toast(t('parentConnected', { name: player.name }));
+    } catch {
+      toast(t('connectUnavailable'), 'error');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -135,7 +111,7 @@ export function ParentLinks({ player }: { player: Player }) {
           value={code}
           onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
         />
-        <Button type="submit" variant="primary" disabled={code.length !== 6} data-testid={`connect-parent-${player.id}`}>
+        <Button type="submit" variant="primary" disabled={code.length !== 6 || busy} data-testid={`connect-parent-${player.id}`}>
           {t('connectParent')}
         </Button>
       </form>

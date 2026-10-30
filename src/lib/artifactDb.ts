@@ -112,7 +112,7 @@ const UNKNOWN = '\u0000unknown';
 
 export class ArtifactDbAdapter implements StorageAdapter {
   readonly kind = 'artifact' as const;
-  readonly label = 'Shared academy database on claude.ai — saved for everyone this page is shared with';
+  label = 'Shared academy database on claude.ai — saved for everyone this page is shared with';
   readonly debounceMs = 0;
   /** Highest role this viewer may use (from their sharing level). */
   maxRole: Role = 'parent';
@@ -130,7 +130,9 @@ export class ArtifactDbAdapter implements StorageAdapter {
   private remote: { coll: Partial<Record<CollKey, Snap[]>>; drills: Snap[] | null; config: Snap | null } = { coll: {}, drills: null, config: null };
   private unsubs: (() => void)[] = [];
 
-  constructor(private db: DbLike, private user: UserLike | null) {}
+  constructor(private db: DbLike, private user: UserLike | null, label?: string) {
+    if (label) this.label = label;
+  }
 
   /** This viewer's claude.ai user id (parents need it for their family path). */
   myId: string | null = null;
@@ -185,7 +187,7 @@ export class ArtifactDbAdapter implements StorageAdapter {
     let state: AppState = this.baseState('coach');
     state.settings.role = (() => {
       const r = readPrefs().role;
-      return r && ROLE_RANK[r] <= ROLE_RANK[this.maxRole] && r !== 'parent' ? r : r === 'parent' ? 'parent' : 'coach';
+      return r && ROLE_RANK[r] <= ROLE_RANK[this.maxRole] ? r : this.maxRole;
     })();
     for (const k of Object.keys(COLLS) as CollKey[]) state = this.mergeColl(state, k);
     state = this.mergeDrills(state);

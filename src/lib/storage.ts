@@ -153,16 +153,61 @@ export class SupabaseAuth {
     return this.call('signup', { email, password });
   }
 
+  private inflight: Promise<SupabaseSession | null> | null = null;
+
+  /** Valid session, refreshing the token when it is about to expire (one refresh at a time). */
   async refresh(): Promise<SupabaseSession | null> {
     const s = this.current();
     if (!s) return null;
     if (s.expires_at && s.expires_at * 1000 > Date.now() + 60_000) return s;
+    if (!this.inflight) {
+      this.inflight = this.call('token?grant_type=refresh_token', { refresh_token: s.refresh_token })
+        .catch(() => {
+          this.store(null);
+          return null;
+        })
+        .finally(() => {
+          this.inflight = null;
+        });
+    }
+    return this.inflight;
+  }
+
+  async resetPassword(email: string): Promise<void> {
+    const res = await fetch(`${this.cfg.url}/auth/v1/recover`, {
+      method: 'POST',
+      headers: { apikey: this.cfg.anonKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, redirect_to: window.location.href.split('#')[0] }),
+    });
+    if (!res.ok) throw new Error(`Could not send the email (${res.status})`);
+  }
+
+  /** Session from a magic/recovery link (#access_token=… in the URL), if present. */
+  fromUrl(): SupabaseSession | null {
+    const h = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const access = h.get('access_token');
+    const refresh = h.get('refresh_token');
+    if (!access || !refresh) return null;
     try {
-      return await this.call('token?grant_type=refresh_token', { refresh_token: s.refresh_token });
+      const payload = JSON.parse(atob(access.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      const session: SupabaseSession = { access_token: access, refresh_token: refresh, expires_at: Number(h.get('expires_at')) || payload.exp, user: { id: payload.sub, email: payload.email } };
+      this.store(session);
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+      return session;
     } catch {
-      this.store(null);
       return null;
     }
+  }
+
+  async updatePassword(password: string): Promise<void> {
+    const s = await this.refresh();
+    if (!s) throw new Error('Not signed in');
+    const res = await fetch(`${this.cfg.url}/auth/v1/user`, {
+      method: 'PUT',
+      headers: { apikey: this.cfg.anonKey, Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    if (!res.ok) throw new Error(`Could not change the password (${res.status})`);
   }
 
   signOut() {

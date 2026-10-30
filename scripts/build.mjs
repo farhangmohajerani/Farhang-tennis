@@ -15,7 +15,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-const out = path.join(root, 'dist');
+const out = process.env.OUT_DIR ? path.resolve(root, process.env.OUT_DIR) : path.join(root, 'dist');
 const args = new Set(process.argv.slice(2));
 const require = createRequire(import.meta.url);
 const twDir = path.dirname(require.resolve('tailwindcss/package.json'));
