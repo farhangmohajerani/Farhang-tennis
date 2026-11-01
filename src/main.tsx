@@ -58,6 +58,7 @@ const T = fa
       tabSignIn: 'ورود', tabSignUp: 'ساخت حساب', whoAreYou: 'شما کدام هستید؟', coach: 'مربی', parent: 'والدین / خانواده',
       coachHint: 'مدیر آکادمی باید دسترسی شما را تأیید کند.', parentHint: 'بعد از ثبت‌نام یک کد ۶ رقمی می‌گیرید که به مربی می‌دهید.',
       pickType: 'اول انتخاب کنید مربی هستید یا والدین.',
+      pwHint: 'رمز عبور حداقل ۸ کاراکتر',
       pendingTitle: 'درخواست شما فرستاده شد', pendingText: 'حساب مربی شما ساخته شد. مدیر آکادمی باید دسترسی‌تان را تأیید کند. بعد از تأیید، همین صفحه را دوباره باز کنید.',
       checkAgain: 'دوباره بررسی کن', signOut: 'خروج',
     }
@@ -75,6 +76,7 @@ const T = fa
       tabSignIn: 'Sign in', tabSignUp: 'Create account', whoAreYou: 'Who are you?', coach: 'Coach', parent: 'Parent / family',
       coachHint: 'The academy admin approves coach access.', parentHint: 'After signing up you get a 6-digit code to give to your coach.',
       pickType: 'First choose whether you are a coach or a parent.',
+      pwHint: 'Password: at least 8 characters',
       pendingTitle: 'Request sent', pendingText: 'Your coach account is created. The academy admin needs to approve your access. Open this page again once approved.',
       checkAgain: 'Check again', signOut: 'Sign out',
     };
@@ -197,6 +199,7 @@ function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: Su
           >
             <input className={cls} type="email" autoComplete="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={T.email} value={email} onChange={(e) => setEmail(e.target.value)} id="sb-email" dir="ltr" />
             <input className={cls} type={show ? 'text' : 'password'} autoComplete={mode === 'in' ? 'current-password' : 'new-password'} autoCapitalize="none" autoCorrect="off" placeholder={T.pass} value={password} onChange={(e) => setPassword(e.target.value)} id="sb-password" dir="ltr" />
+            {mode === 'up' && <p className={`-mt-1 text-[13px] ${password && password.length < 8 ? 'font-semibold text-bad' : 'text-muted'}`} data-testid="pw-hint">{T.pwHint}{password ? ` (${password.length}/8)` : ''}</p>}
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> {T.show}</label>
             {note}
             {mode === 'in' ? (
@@ -321,9 +324,12 @@ const root = createRoot(document.getElementById('root')!);
     const linkType = h.get('type');
     const linkError = h.get('error_code') || h.get('error');
     if (linkError) history.replaceState(null, '', window.location.pathname + window.location.search);
+    // Only an email-link hash (#access_token=… / #error=…) is cleared; a normal page hash
+    // (#planner, #session-…) is kept so a refresh stays on the same page.
+    const authHash = /(^|[#&])(access_token|error|error_code|type)=/.test(window.location.hash);
     const fromLink = auth.fromUrl();
     const go = () => {
-      window.location.hash = '';
+      if (authHash && /(access_token|error|type)=/.test(window.location.hash)) window.location.hash = '';
       void startSupabase(cfg, auth).catch((e) => {
         console.error(e);
         root.render(<SignIn auth={auth} onDone={go} />);

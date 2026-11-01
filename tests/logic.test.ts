@@ -175,3 +175,14 @@ test('Persian dictionary covers every English key', () => {
   const missing = Object.keys(DICT_EN).filter((k) => !(k in DICT_FA));
   assert.deepEqual(missing, []);
 });
+
+test('planner save merges another coach\'s concurrent changes', async () => {
+  const { mergePlan } = await import('../src/pages/Planner');
+  const s = (id: string, title: string, date: string) => ({ id, index: 1, date, title, focus: '', items: [], status: 'planned' as const, coachNote: '', kind: 'training' as const });
+  const base = { id: 'p', playerId: 'x', name: 'Plan', priority: '', owner: 'coach' as const, sharedWithCoachId: null, createdAt: '', sessions: [s('a', 'A', '2026-01-01'), s('b', 'B', '2026-01-02'), s('c', 'C', '2026-01-03')] };
+  const mine = { ...base, sessions: [{ ...base.sessions[0], title: 'A mine' }, base.sessions[1]] }; // edited a, removed c
+  const theirs = { ...base, name: 'Renamed', sessions: [base.sessions[0], { ...base.sessions[1], title: 'B theirs' }, base.sessions[2], s('d', 'D', '2026-01-04')] };
+  const m = mergePlan(base as never, mine as never, theirs as never);
+  assert.deepEqual(m.sessions.map((x) => x.title), ['A mine', 'B theirs', 'D']);
+  assert.equal(m.name, 'Renamed');
+});

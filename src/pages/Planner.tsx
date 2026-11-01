@@ -23,6 +23,8 @@ export function Planner({ planId }: { planId: string }) {
   const plans = player ? plansForPlayer(state, player.id) : [];
   const stored = plans.find((p) => p.id === planId) ?? (player ? primaryPlan(state, player.id) : undefined);
   const [draft, setDraft] = useState<Plan | null>(stored ? structuredClone(stored) : null);
+  // The saved plan my draft started from (for merging other people's changes on save).
+  const [base, setBase] = useState<Plan | null>(stored ? structuredClone(stored) : null);
   const [openId, setOpenId] = useState<string | null>(() => stored?.sessions.find((s) => s.status === 'planned')?.id ?? null);
   const [gen, setGen] = useState({ start: todayISO(), days: [2, 4, 6] });
 
@@ -34,7 +36,11 @@ export function Planner({ planId }: { planId: string }) {
       setDraft((d) => (d && !plans.some((p) => p.id === d.id) && d.sessions.length ? d : null));
       return;
     }
-    setDraft((d) => (!d || d.id !== stored.id || !dirtyRef(d, storedJSON) ? structuredClone(stored) : d));
+    setDraft((d) => {
+      const reset = !d || d.id !== stored.id || !dirtyRef(d, storedJSON);
+      if (reset) setBase(structuredClone(stored));
+      return reset ? structuredClone(stored) : d;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stored?.id, storedJSON]);
 
@@ -71,7 +77,11 @@ export function Planner({ planId }: { planId: string }) {
 
   const save = () => {
     if (!draft) return;
-    const sorted = { ...draft, sessions: renumber(draft.sessions) };
+    // Merge with what others saved meanwhile: anything I did not touch takes the latest saved version.
+    const merged = stored && base && base.id === draft.id ? mergePlan(base, draft, stored) : draft;
+    const sorted = { ...merged, sessions: renumber([...merged.sessions].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.index - b.index))) };
+    setBase(structuredClone(sorted));
+    setDraft(structuredClone(sorted));
     dispatch({ type: 'savePlan', plan: sorted });
     toast(t('planSaved'));
     if (sorted.id !== stored?.id) navigate(`planner-${sorted.id}`);
@@ -100,6 +110,7 @@ export function Planner({ planId }: { planId: string }) {
       })),
     };
     setDraft(plan);
+    setBase(null);
     setOpenId(plan.sessions[0].id);
   };
 
@@ -118,10 +129,10 @@ export function Planner({ planId }: { planId: string }) {
       </PageHeader>
 
       {dirty && (
-        <div className="sticky z-20 mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-accent bg-accent-soft p-3" style={{ top: 'calc(env(safe-area-inset-top, 0px) + 60px)' }} data-testid="unsaved-bar">
+        <div className="savebar fixed inset-x-0 z-40 mx-auto flex max-w-xl flex-wrap items-center gap-2 rounded-2xl border border-accent bg-accent-soft p-3 shadow-lg" data-testid="unsaved-bar">
           <span className="text-sm font-semibold text-accent">●&nbsp;{t('unsaved')}</span>
           <div className="ms-auto flex gap-2">
-            <Button size="sm" onClick={() => setDraft(stored ? structuredClone(stored) : null)}>
+            <Button size="sm" onClick={() => { setDraft(stored ? structuredClone(stored) : null); setBase(stored ? structuredClone(stored) : null); }}>
               {t('cancel')}
             </Button>
             <Button size="sm" variant="primary" onClick={save} data-testid="save-plan">
@@ -249,8 +260,37 @@ export function Planner({ planId }: { planId: string }) {
           </Card>
         </aside>
       </div>
+      {dirty && <div className="h-20" aria-hidden />}
     </div>
   );
+}
+
+/**
+ * Three-way merge: `base` is what my draft started from, `mine` my edited draft, `theirs` the
+ * latest saved plan. Sessions/fields I did not change take theirs; sessions they added are kept;
+ * sessions I removed stay removed; when we both changed the same session, mine wins.
+ */
+export function mergePlan(base: Plan, mine: Plan, theirs: Plan): Plan {
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const baseById = new Map(base.sessions.map((s) => [s.id, s]));
+  const theirsById = new Map(theirs.sessions.map((s) => [s.id, s]));
+  const mineIds = new Set(mine.sessions.map((s) => s.id));
+  const sessions: Session[] = [];
+  for (const s of mine.sessions) {
+    const b = baseById.get(s.id);
+    const t = theirsById.get(s.id);
+    if (b && same(s, b)) {
+      if (t) sessions.push({ ...t, index: s.index }); // untouched by me → latest saved (dropped if they removed it)
+    } else sessions.push(s);
+  }
+  for (const t of theirs.sessions) if (!mineIds.has(t.id) && !baseById.has(t.id)) sessions.push(t); // added by them
+  return {
+    ...theirs,
+    ...mine,
+    name: mine.name !== base.name ? mine.name : theirs.name,
+    priority: mine.priority !== base.priority ? mine.priority : theirs.priority,
+    sessions,
+  };
 }
 
 function dirtyRef(d: Plan, storedJSON: string) {

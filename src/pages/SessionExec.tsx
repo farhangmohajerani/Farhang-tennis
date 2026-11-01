@@ -15,7 +15,17 @@ export function SessionExec({ sessionId }: { sessionId: string }) {
   const player = activePlayer(state);
   const plan = player ? primaryPlan(state, player.id) : undefined;
   const today = todayISO();
-  const session = plan?.sessions.find((s) => s.id === sessionId) ?? plan?.sessions.find((s) => s.status === 'planned' && s.date >= today) ?? plan?.sessions.find((s) => s.status === 'planned');
+  // Once a session is open it stays open (completing it must not jump to the next one).
+  const [pinned, setPinned] = useState(sessionId);
+  useEffect(() => setPinned(sessionId), [sessionId]);
+  const session = plan?.sessions.find((s) => s.id === (pinned || sessionId)) ?? plan?.sessions.find((s) => s.status === 'planned' && s.date >= today) ?? plan?.sessions.find((s) => s.status === 'planned');
+
+  // Pin the open session in the address so a refresh (or completing it) stays on this session.
+  useEffect(() => {
+    if (!session) return;
+    if (pinned !== session.id) setPinned(session.id);
+    if (window.location.hash.replace(/^#/, '') !== `session-${session.id}`) history.replaceState(null, '', `#session-${session.id}`);
+  }, [session?.id]);
 
   if (state.settings.role === 'parent') {
     return (
