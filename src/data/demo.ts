@@ -1,7 +1,8 @@
-import type { AppState, Log, Plan, Session } from '../types';
+import type { AppState, Log, Match, MatchFormat, Plan, Session, Tournament } from '../types';
 import { SEED_DRILLS } from './drills';
 import { LEVEL_THRESHOLDS } from './drills/factory';
 import { addDays, generateDates } from '../lib/schedule';
+import { applyPoint, encodePoint, newEngine, other, serverOf, type Point, type Side } from '../lib/match';
 
 export const DEMO_IDS = {
   coach: 'person-coach-demo',
@@ -10,7 +11,69 @@ export const DEMO_IDS = {
   player: 'player-demo',
   plan: 'plan-demo',
   tournament: 'tour-demo',
+  pastTournament: 'tour-demo-past',
 } as const;
+
+/* ---------- a believable charted match, generated deterministically ---------- */
+
+function rng(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function pick<T>(r: () => number, items: [T, number][]): T {
+  let x = r() * items.reduce((a, [, w]) => a + w, 0);
+  for (const [v, w] of items) {
+    x -= w;
+    if (x <= 0) return v;
+  }
+  return items[items.length - 1][0];
+}
+
+function simulatePoint(r: () => number, server: Side): Point {
+  const p = server === 'p';
+  const firstIn = r() < (p ? 0.58 : 0.62);
+  const serve: 1 | 2 = firstIn ? 1 : 2;
+  if (!firstIn && r() < (p ? 0.1 : 0.07)) return { win: other(server), serve: 2, end: 'doubleFault', shot: 'serve', rally: 'short', net: false };
+  const serverWins = r() < (p ? (serve === 1 ? 0.7 : 0.53) : serve === 1 ? 0.58 : 0.44);
+  const win: Side = serverWins ? server : other(server);
+  const rally = pick<Point['rally']>(r, [['short', 45], ['mid', 35], ['long', 20]]);
+  const stroke = pick<Point['shot']>(r, [['fh', 45], ['bh', 35], ['volley', 8], ['overhead', 3], ['drop', 4], ['lob', 5]]);
+  const ret = pick<Point['shot']>(r, [['fh', 50], ['bh', 50]]);
+  const net = win === 'p' ? r() < 0.16 : r() < 0.06;
+  const x = r();
+  if (serverWins) {
+    if (serve === 1 && x < 0.08) return { win, serve, end: 'ace', shot: 'serve', rally: 'short', net: false };
+    if (x < 0.18) return { win, serve, end: 'serviceWinner', shot: 'serve', rally: 'short', net: false };
+    if (x < 0.32) return { win, serve, end: 'returnError', shot: ret, rally: 'short', net: false };
+  } else if (x < 0.07) {
+    return { win, serve, end: 'returnWinner', shot: ret, rally: 'short', net: false };
+  }
+  const end = pick<Point['end']>(r, [['winner', 38], ['forcedError', 25], ['unforcedError', 37]]);
+  return { win, serve, end, shot: stroke, rally, net };
+}
+
+/** Simulate until the player wins (the demo story needs a win); same result every time. */
+function demoPoints(format: MatchFormat, firstServer: Side, seed: number): string[] {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const r = rng(seed + attempt * 7919);
+    const e = newEngine(format, firstServer);
+    const pts: string[] = [];
+    while (!e.winner && pts.length < 400) {
+      const pt = simulatePoint(r, serverOf(e));
+      applyPoint(e, pt.win);
+      pts.push(encodePoint(pt));
+    }
+    if (e.winner === 'p') return pts;
+  }
+  return [];
+}
 
 /** Demo plan: baseline → focused block → match evaluation → baseline comparison. */
 const PLAN_BLUEPRINT: { title: string; focus: string; kind: Session['kind']; items: [string, string][] }[] = [
@@ -121,7 +184,48 @@ const PLAN_BLUEPRINT: { title: string; focus: string; kind: Session['kind']; ite
 
 export function createDemoState(today: string): AppState {
   const start = addDays(today, -8);
-  const tournament = { id: DEMO_IDS.tournament, playerId: DEMO_IDS.player, name: 'Regional Junior Open (demo)', start: addDays(today, 15), end: addDays(today, 17) };
+  const tournament: Tournament = {
+    id: DEMO_IDS.tournament,
+    playerId: DEMO_IDS.player,
+    name: 'Regional Junior Open (demo)',
+    start: addDays(today, 15),
+    end: addDays(today, 17),
+    location: 'Ankara',
+    category: 'National U14',
+    surface: 'hard',
+    indoor: false,
+    aim: 'both',
+    goals: [
+      { id: 'goal-demo-1', kind: 'outcome', round: 'QF' },
+      { id: 'goal-demo-2', kind: 'stat', metric: 'firstServeIn', op: 'gte', value: 60 },
+      { id: 'goal-demo-3', kind: 'stat', metric: 'unforcedErrors', op: 'lte', value: 15 },
+      { id: 'goal-demo-4', kind: 'drill', drillId: 'tp-001', target: 50 },
+      { id: 'goal-demo-5', kind: 'custom', text: 'Same routine before every serve', achieved: null },
+    ],
+    notes: 'Taper the last two days. Arrive early for a 30-minute hit on the match courts.',
+    result: null,
+    review: '',
+  };
+  const pastTournament: Tournament = {
+    id: DEMO_IDS.pastTournament,
+    playerId: DEMO_IDS.player,
+    name: 'Ankara Club Championship (demo)',
+    start: addDays(today, -24),
+    end: addDays(today, -22),
+    location: 'Ankara',
+    category: 'Club',
+    surface: 'clay',
+    indoor: false,
+    aim: 'training',
+    goals: [
+      { id: 'goal-demo-6', kind: 'stat', metric: 'firstServeIn', op: 'gte', value: 60 },
+      { id: 'goal-demo-7', kind: 'stat', metric: 'doubleFaults', op: 'lte', value: 4 },
+      { id: 'goal-demo-8', kind: 'drill', drillId: 'fh-006', target: 55 },
+    ],
+    notes: '',
+    result: null,
+    review: 'Second serve held up well. Depth dropped in the second round under pressure — keep depth as priority 1.',
+  };
   // Tue / Thu / Sat schedule. Tournament days are skipped at generation; session 8 is then
   // deliberately placed ON the tournament start so the planner's conflict tools are visible.
   const dates = generateDates(start, 10, [2, 4, 6], []);
@@ -193,6 +297,73 @@ export function createDemoState(today: string): AppState {
     );
   }
 
+  const junior: MatchFormat = { sets: 3, games: 6, finalSet: 'mtb', noAd: false };
+  const baseMatch = { playerId: DEMO_IDS.player, opponentHand: 'right' as const, indoor: false, endReason: 'completed' as const, winner: null, sets: [], points: [] as string[], notes: '' };
+  const matches: Match[] = [
+    {
+      ...baseMatch,
+      id: 'match-demo-1',
+      date: pastTournament.start,
+      kind: 'official',
+      tournamentId: pastTournament.id,
+      round: 'R32',
+      opponent: 'Mina Aksoy',
+      opponentRating: 'UTR 5.1',
+      surface: 'clay',
+      format: junior,
+      firstServer: 'p',
+      mode: 'live',
+      points: demoPoints(junior, 'p', 11),
+      status: 'done',
+      notes: 'Served well on big points. Backhand errors in long rallies.',
+      createdAt: `${pastTournament.start}T10:00:00.000Z`,
+      updatedAt: `${pastTournament.start}T12:00:00.000Z`,
+    },
+    {
+      ...baseMatch,
+      id: 'match-demo-2',
+      date: addDays(pastTournament.start, 1),
+      kind: 'official',
+      tournamentId: pastTournament.id,
+      round: 'R16',
+      opponent: 'Zeynep Kılıç',
+      opponentRating: 'UTR 6.0',
+      opponentHand: 'left',
+      surface: 'clay',
+      format: junior,
+      firstServer: 'o',
+      mode: 'score',
+      sets: [
+        { p: 4, o: 6, tb: null },
+        { p: 3, o: 6, tb: null },
+      ],
+      status: 'done',
+      winner: 'o',
+      notes: 'Lefty serve out wide caused problems on the ad side.',
+      createdAt: `${addDays(pastTournament.start, 1)}T10:00:00.000Z`,
+      updatedAt: `${addDays(pastTournament.start, 1)}T12:00:00.000Z`,
+    },
+    {
+      ...baseMatch,
+      id: 'match-demo-3',
+      date: addDays(today, -5),
+      kind: 'practice',
+      tournamentId: null,
+      round: null,
+      opponent: 'Deniz Yıldız',
+      opponentRating: 'Club',
+      surface: 'hard',
+      format: junior,
+      firstServer: 'o',
+      mode: 'live',
+      points: demoPoints(junior, 'o', 29),
+      status: 'done',
+      notes: 'Good depth in the first set. Approached two short balls and won both.',
+      createdAt: `${addDays(today, -5)}T16:00:00.000Z`,
+      updatedAt: `${addDays(today, -5)}T18:00:00.000Z`,
+    },
+  ];
+
   return {
     version: 1,
     drills: SEED_DRILLS.map((d) => ({ ...d })),
@@ -216,8 +387,9 @@ export function createDemoState(today: string): AppState {
       },
     ],
     plans: [plan],
-    tournaments: [tournament],
+    tournaments: [pastTournament, tournament],
     logs,
+    matches,
     settings: {
       lang: 'en',
       role: 'coach',

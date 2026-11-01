@@ -31,7 +31,11 @@ Requires Node 20+.
 | Training planner: 10-session plan, add/remove/reorder sessions and drills, edit everything, explicit Save with unsaved-changes bar, tournament calendar, conflict + taper warnings, one-click reschedule off tournament days, generate the next 10 sessions on chosen weekdays | ✅ |
 | Session execution: eligible / attempts / correct decisions / successful executions, error types, notes, context (baseline / practice / match), live KPIs, validation, delete with confirmation, mark completed | ✅ |
 | Parent view: read-only calendar with "what & why", coach notes, per-session results; start a self-guided plan and share it with the coach | ✅ (no payments — see limitations) |
-| Progress: baseline vs current per drill, progress by drill with trend, training-to-match transfer | ✅ |
+| Progress: baseline vs current per drill, progress by drill with trend, training-to-match transfer, match statistics over time | ✅ |
+| **Matches:** pre-match questions (practice / official, tournament + round, opponent and level, plays R/L, date, surface, indoor, format presets, sets, games per set, deciding set or 10-point match tie-break, advantage / no-ad, who serves first, point-by-point or final score only) | ✅ `src/pages/MatchSetup.tsx` |
+| **Live point tracker:** 1st serve in / fault → 2nd serve in / double fault, ace, unreturned serve; then winner, return winner, forced error, unforced error, return error for either player; optional stroke, rally length (0–4 / 5–8 / 9+) and net; undo; end early (retired / stopped); break / set / match point, deuce, tie-break shown live; parents follow the live score | ✅ `src/pages/MatchPage.tsx`, engine in `src/lib/match.ts` |
+| **Match report:** final score, ATP/WTA-style statistics for both players (aces, double faults, 1st serve in, 1st/2nd serve points won, break points saved/won, service games, return points vs 1st/2nd serve, winners, unforced/forced/return errors, total points), momentum chart, points by rally length, winners vs errors by stroke, net points, point-by-point log, coach notes | ✅ `src/pages/MatchReport.tsx` |
+| **Tournaments:** details (dates, location, category, surface), aim (results / apply training / both), goals checked automatically — result (reach a round / win), match stat targets, training-focus drills (practice logs in the 6 weeks before), other goals marked by the coach — preparation (countdown, sessions, taper and conflict warnings, notes), matches by round, furthest round, review | ✅ `src/pages/TournamentDetail.tsx`, `src/lib/competition.ts` |
 | Admin: add / edit / archive / restore / delete (custom) drills, JSON + CSV import/export with row-level error report, full workspace backup/restore, editable default star thresholds per level, reset demo | ✅ |
 | English LTR / Persian RTL toggle (UI fully translated; dates in the Persian calendar) | ✅ |
 | Roles: Parent / Coach / Admin with guarded pages | ✅ demo role switcher (see limitations) |
@@ -81,13 +85,17 @@ src/
   data/drills/          200 drills, one file per category; factory.ts fills category boilerplate
   data/demo.ts          demo player, parent, coach, admin, 10-session plan, tournament, logs
   lib/kpi.ts            KPI maths (pure, unit-tested)
+  lib/match.ts          tennis scoring engine (ad/no-ad, tie-breaks, match tie-break, short sets, serve
+                        rotation), 6-character point codes, match statistics, goal metrics (unit-tested)
+  lib/competition.ts    tournaments: furthest round, goal evaluation, charted-match aggregates
   lib/schedule.ts       dates, tournament conflicts, taper warnings, rescheduling, plan generation
   lib/reducer.ts        all state changes (pure, unit-tested)
   lib/store.tsx         React context, debounced persistence, toasts, i18n binding
   lib/storage.ts        StorageAdapter: LocalStorageAdapter (demo) · SupabaseAdapter · MemoryAdapter
   lib/drillIO.ts csv.ts JSON/CSV import-export with per-row validation
   lib/i18n.ts           English + Persian dictionaries
-  lib/router.tsx        hash routes (#library, #drill-fh-001, #session-<id>, #planner-<id>)
+  lib/router.tsx        hash routes (#library, #drill-fh-001, #session-<id>, #planner-<id>, #matches,
+                        #tournaments, #newmatch[-<tournamentId>], #match-<id>, #tournament-<id>)
   components/ pages/    UI
 scripts/build.mjs       esbuild + Tailwind v4 compile API
 supabase/schema.sql     table + row-level security
@@ -122,8 +130,9 @@ Or import the repo in the Vercel dashboard — no framework preset needed. Add `
 
 ## Testing
 
+* **Match engine (17 tests, `tests/match.test.ts`)** — point codes, game/deuce/advantage, no-ad deciding point, break points, set rules (6-4, 7-5, tie-break at 6-6), tie-break serve rotation and next-set server, 10-point match tie-break, short sets, replay stops at match end, statistics attribution (serve, return, winners, errors, strokes, rally length, net), break points saved, final-score-only matches, tournament furthest round and goal evaluation, demo matches, every generated label translated.
 * **Unit (19 tests, `tests/logic.test.ts`)** — exact drill counts per category, unique IDs and names, every required field, KPI formulas and zero-denominator handling, star thresholds, count validation, CSV parser edge cases, lossless CSV and JSON round-trip of all 200 drills, rejected-row reporting, merge semantics, tournament conflict/reschedule/taper logic, demo-data integrity, reducer rules, stored-state validation, Persian dictionary coverage.
-* **End-to-end (18 scenarios × 2 profiles, `e2e/e2e.mjs`)** — library count, search, combined filters, drill details, assigning a drill to a session, planner edit/reorder/save/reschedule, KPI logging with validation and live calculation, delete with confirmation, **reload persistence**, completing a session, Persian RTL toggle and persistence, role guards, parent plan sharing, admin create/edit/archive/restore/delete, JSON/CSV export and re-import (including a file with a bad row), threshold editing, no horizontal overflow on any page, no uncaught errors.
+* **End-to-end (26 scenarios × 2 profiles, `e2e/e2e.mjs`)** — matches and tournaments (season record and averages; goals evaluated, added, marked and removed; charting ace / fault / double fault / winner / errors with stroke, rally and net detail, undo and reload; finishing a set and the report; reopening; final-score-only entry with tie-break notation updating the tournament result goal; retirement; parent read-only; Persian layout), library count, search, combined filters, drill details, assigning a drill to a session, planner edit/reorder/save/reschedule, KPI logging with validation and live calculation, delete with confirmation, **reload persistence**, completing a session, Persian RTL toggle and persistence, role guards, parent plan sharing, admin create/edit/archive/restore/delete, JSON/CSV export and re-import (including a file with a bad row), threshold editing, no horizontal overflow on any page, no uncaught errors.
 
 ## Known limitations (v1)
 

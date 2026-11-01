@@ -14,6 +14,7 @@ export const NAV: { name: string; key: DictKey; roles: Role[] }[] = [
   { name: 'planner', key: 'nav_planner', roles: ['coach', 'admin'] },
   { name: 'session', key: 'nav_session', roles: ['coach', 'admin'] },
   { name: 'parent', key: 'nav_parent', roles: ['parent', 'coach', 'admin'] },
+  { name: 'matches', key: 'nav_matches', roles: ['parent', 'coach', 'admin'] },
   { name: 'progress', key: 'nav_progress', roles: ['parent', 'coach', 'admin'] },
   { name: 'admin', key: 'nav_admin', roles: ['admin'] },
 ];
@@ -23,7 +24,9 @@ export function Layout({ route, children }: { route: string; children: ReactNode
   const role = state.settings.role;
   const player = activePlayer(state);
   const items = NAV.filter((n) => n.roles.includes(role));
-  const activeName = route === 'drill' ? 'library' : route;
+  // Phones: at most 7 tabs. Coaches reach the parent preview from the dashboard instead.
+  const mobileItems = role === 'parent' ? items : items.filter((n) => n.name !== 'parent');
+  const activeName = route === 'drill' ? 'library' : ['tournaments', 'match', 'newmatch', 'tournament'].includes(route) ? 'matches' : route;
   const [playersOpen, setPlayersOpen] = useState(false);
   const rank: Record<Role, number> = { parent: 0, coach: 1, admin: 2 };
   const roles = ROLES.filter((r) => !adapter.maxRole || rank[r] <= rank[adapter.maxRole]);
@@ -147,7 +150,7 @@ export function Layout({ route, children }: { route: string; children: ReactNode
         aria-label="Main mobile"
       >
         <ul className="flex">
-          {items.map((n) => (
+          {mobileItems.map((n) => (
             <li key={n.name} className="min-w-0 flex-1">
               <a
                 href={href(n.name)}

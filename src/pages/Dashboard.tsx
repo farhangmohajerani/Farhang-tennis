@@ -9,6 +9,45 @@ import { Badge, Card, Empty, Icon, KpiTile, PageHeader, SectionTitle } from '../
 import { PlayerForm } from '../components/Players';
 import { ParentConnect } from '../components/ParentLink';
 import { CoachRequestsBanner } from '../components/TeamPanel';
+import { daysBetween, matchesOfPlayer } from '../lib/competition';
+import { ResultBadge, scoreLine } from '../components/MatchBits';
+
+function MatchesCard({ playerId }: { playerId: string }) {
+  const { state, t, lang } = useStore();
+  const all = matchesOfPlayer(state, playerId);
+  const live = all.filter((m) => m.status === 'live');
+  const last = [...all].reverse().find((m) => m.status === 'done');
+  const isCoach = state.settings.role !== 'parent';
+  return (
+    <Card className="p-5">
+      <SectionTitle aside={<a href={href('matches')} className="text-sm font-semibold text-accent">{t('nav_matches')} →</a>}>{t('matchesCard')}</SectionTitle>
+      <div className="flex flex-col gap-2" data-testid="dash-matches">
+        {live.map((m) => (
+          <a key={m.id} href={href(`match-${m.id}`)} className="flex flex-wrap items-center gap-2 rounded-xl bg-bad-soft p-2.5 text-sm">
+            <ResultBadge m={m} />
+            <span className="font-semibold">{t('vsName', { name: m.opponent || t('opponent') })}</span>
+            <span className="num ms-auto font-mono font-semibold" dir="ltr">{scoreLine(m, t)}</span>
+          </a>
+        ))}
+        {last ? (
+          <a href={href(`match-${last.id}`)} className="flex flex-wrap items-center gap-2 text-sm hover:text-accent">
+            <span className="eyebrow w-full">{t('lastMatch')} · {formatDate(lang, last.date, { day: 'numeric', month: 'short' })}</span>
+            <ResultBadge m={last} />
+            <span className="num font-mono font-semibold" dir="ltr">{scoreLine(last, t)}</span>
+            <span className="min-w-0 flex-1 truncate">{t('vsName', { name: last.opponent || t('opponent') })}</span>
+          </a>
+        ) : (
+          !live.length && <p className="text-sm text-muted">{t('noMatches')}</p>
+        )}
+        {isCoach && (
+          <a href={href('newmatch')} className="mt-1 inline-flex h-9 items-center self-start rounded-full border border-line px-3.5 text-sm font-semibold hover:border-accent">
+            + {t('newMatch')}
+          </a>
+        )}
+      </div>
+    </Card>
+  );
+}
 
 export function Dashboard() {
   const { state, t, lang, adapter } = useStore();
@@ -135,23 +174,33 @@ export function Dashboard() {
             )}
           </Card>
           <Card className="p-5">
-            <SectionTitle>{t('tournaments')}</SectionTitle>
+            <SectionTitle aside={<a href={href('tournaments')} className="text-sm font-semibold text-accent">{t('tab_tournaments')} →</a>}>{t('tournaments')}</SectionTitle>
             {tournaments.length ? (
-              <ul className="flex flex-col gap-2">
-                {tournaments.map((x) => (
-                  <li key={x.id} className="flex items-center gap-3">
-                    <Icon.trophy className="h-5 w-5 text-accent" />
-                    <span className="font-semibold">{x.name}</span>
-                    <span className="num ms-auto text-[13px] text-muted">
-                      {formatDate(lang, x.start, { day: 'numeric', month: 'short' })}–{formatDate(lang, x.end, { day: 'numeric', month: 'short' })}
-                    </span>
-                  </li>
-                ))}
+              <ul className="flex flex-col gap-1" data-testid="dash-tournaments">
+                {tournaments.map((x) => {
+                  const days = daysBetween(today, x.start);
+                  return (
+                    <li key={x.id}>
+                      <a href={href(`tournament-${x.id}`)} className="flex items-center gap-3 rounded-lg py-1.5 hover:text-accent">
+                        <Icon.trophy className="h-5 w-5 shrink-0 text-accent" />
+                        <span className="min-w-0 flex-1 truncate font-semibold">{x.name}</span>
+                        <span className="num shrink-0 text-[13px] text-muted">
+                          {x.start > today ? (days === 1 ? t('startsTomorrow') : t('startsIn', { n: days })) : t('inProgress')}
+                        </span>
+                      </a>
+                      <span className="num block ps-8 text-[12px] text-muted">
+                        {formatDate(lang, x.start, { day: 'numeric', month: 'short' })}–{formatDate(lang, x.end, { day: 'numeric', month: 'short' })}
+                        {x.goals.length > 0 && ` · ${t('goalsTitle')}: ${x.goals.length}`}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <p className="text-sm text-muted">—</p>
             )}
           </Card>
+          <MatchesCard playerId={player.id} />
         </div>
       </div>
 

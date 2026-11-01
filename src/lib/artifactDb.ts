@@ -5,6 +5,7 @@
  * overwriting each other's work:
  *   academy/data/players/{id}      academy/data/plans/{id}
  *   academy/data/logs/{id}         academy/data/tournaments/{id}
+ *   academy/data/matches/{id}      one match: details, format and its points (6-character codes)
  *   academy/library/drills/{id}    only drills that differ from the 200-drill seed (edits, archives, custom)
  *   academy/config                 level-default star thresholds
  * Per-viewer conveniences (language, role preview, selected player) stay in browser storage.
@@ -16,7 +17,7 @@
  * keep up to date whenever a linked child's data changes. Only the owner writes the
  * library and thresholds.
  */
-import { DrillSchema, LogSchema, PlanSchema, PlayerSchema, ThresholdsSchema, TournamentSchema, type AppState, type Level, type Role, type Thresholds } from '../types';
+import { DrillSchema, LogSchema, MatchSchema, PlanSchema, PlayerSchema, ThresholdsSchema, TournamentSchema, type AppState, type Level, type Role, type Thresholds } from '../types';
 import { SEED_DRILLS } from '../data/drills';
 import { LEVEL_THRESHOLDS } from '../data/drills/factory';
 import type { StorageAdapter } from './storage';
@@ -42,6 +43,8 @@ export const DB_RULES = [
 const FAMILY = 'family';
 const familyPath = (parentId: string, playerId: string) => `${FAMILY}/${parentId}/players/${playerId}`;
 const MAX_FAMILY_LOGS = 400;
+const MAX_FAMILY_MATCHES = 80;
+const FAMILY_BUDGET = 240_000;
 
 /** The read-only copy of one child's data that a linked parent can read. */
 export function familyDoc(s: AppState, playerId: string): Record<string, unknown> | null {
@@ -49,12 +52,20 @@ export function familyDoc(s: AppState, playerId: string): Record<string, unknown
   if (!player) return null;
   const plans = s.plans.filter((p) => p.playerId === playerId && (p.owner === 'coach' || p.sharedWithCoachId));
   let logs = s.logs.filter((l) => l.playerId === playerId).slice(-MAX_FAMILY_LOGS);
+  let matches = s.matches
+    .filter((m) => m.playerId === playerId)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))
+    .slice(-MAX_FAMILY_MATCHES);
   const tournaments = s.tournaments.filter((t) => t.playerId === playerId);
-  const used = new Set([...plans.flatMap((p) => p.sessions.flatMap((x) => x.items.map((i) => i.drillId))), ...logs.map((l) => l.drillId)]);
+  const goalDrills = tournaments.flatMap((t) => t.goals.flatMap((g) => (g.kind === 'drill' ? [g.drillId] : [])));
+  const used = new Set([...plans.flatMap((p) => p.sessions.flatMap((x) => x.items.map((i) => i.drillId))), ...logs.map((l) => l.drillId), ...goalDrills]);
   const drills = s.drills.filter((d) => used.has(d.id) && SEED_JSON.get(d.id) !== JSON.stringify(d));
-  const body = () => ({ player: { ...player, parentIds: [] }, plans, logs, tournaments, drills });
-  // Stay under the 256 KiB document limit by keeping the newest results.
-  while (JSON.stringify(body()).length > 240_000 && logs.length > 20) logs = logs.slice(Math.floor(logs.length / 4));
+  const body = () => ({ player: { ...player, parentIds: [] }, plans, logs, tournaments, matches, drills });
+  // Stay under the 256 KiB document limit by keeping the newest results and matches.
+  while (JSON.stringify(body()).length > FAMILY_BUDGET && (logs.length > 20 || matches.length > 5)) {
+    if (logs.length > 20) logs = logs.slice(Math.floor(logs.length / 4));
+    if (JSON.stringify(body()).length > FAMILY_BUDGET && matches.length > 5) matches = matches.slice(Math.max(1, Math.floor(matches.length / 4)));
+  }
   return body();
 }
 
@@ -63,6 +74,7 @@ const COLLS = {
   plans: { path: 'academy/data/plans', schema: PlanSchema },
   logs: { path: 'academy/data/logs', schema: LogSchema },
   tournaments: { path: 'academy/data/tournaments', schema: TournamentSchema },
+  matches: { path: 'academy/data/matches', schema: MatchSchema },
 } as const;
 type CollKey = keyof typeof COLLS;
 const DRILLS_PATH = 'academy/library/drills';
@@ -206,6 +218,7 @@ export class ArtifactDbAdapter implements StorageAdapter {
       plans: [],
       tournaments: [],
       logs: [],
+      matches: [],
       settings: {
         lang: prefs.lang === 'fa' ? 'fa' : prefs.lang === 'en' ? 'en' : navigator.language?.toLowerCase().startsWith('fa') ? 'fa' : 'en',
         role,
@@ -224,7 +237,7 @@ export class ArtifactDbAdapter implements StorageAdapter {
     let docs: Snap[] = [];
     let initialised = false;
     const build = (s: AppState): AppState => {
-      const out = { ...s, players: [] as AppState['players'], plans: [] as AppState['plans'], logs: [] as AppState['logs'], tournaments: [] as AppState['tournaments'] };
+      const out = { ...s, players: [] as AppState['players'], plans: [] as AppState['plans'], logs: [] as AppState['logs'], tournaments: [] as AppState['tournaments'], matches: [] as AppState['matches'] };
       const overrides = new Map<string, z.infer<typeof DrillSchema>>();
       for (const d of docs) {
         const raw = d.data() ?? {};
@@ -234,6 +247,7 @@ export class ArtifactDbAdapter implements StorageAdapter {
         for (const x of (raw.plans as unknown[]) ?? []) { const r = PlanSchema.safeParse(x); if (r.success) out.plans.push(r.data); }
         for (const x of (raw.logs as unknown[]) ?? []) { const r = LogSchema.safeParse(x); if (r.success) out.logs.push(r.data); }
         for (const x of (raw.tournaments as unknown[]) ?? []) { const r = TournamentSchema.safeParse(x); if (r.success) out.tournaments.push(r.data); }
+        for (const x of (raw.matches as unknown[]) ?? []) { const r = MatchSchema.safeParse(x); if (r.success) out.matches.push(r.data); }
         for (const x of (raw.drills as unknown[]) ?? []) { const r = DrillSchema.safeParse(x); if (r.success) overrides.set(r.data.id, r.data); }
       }
       out.players.sort((a, b) => a.name.localeCompare(b.name));
@@ -301,6 +315,7 @@ export class ArtifactDbAdapter implements StorageAdapter {
     if (k === 'logs') (out as { date: string; createdAt: string }[]).sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
     if (k === 'players') (out as { name: string }[]).sort((a, b) => a.name.localeCompare(b.name));
     if (k === 'tournaments') (out as { start: string }[]).sort((a, b) => a.start.localeCompare(b.start));
+    if (k === 'matches') (out as { date: string; createdAt: string }[]).sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
     const next = { ...s, [k]: out } as AppState;
     if (k === 'players') {
       for (const p of next.players) for (const parent of p.parentIds ?? []) {

@@ -141,7 +141,7 @@ export function NumberStepper({ id, value, onChange, label, invalid }: { id: str
   );
 }
 
-export function PageHeader({ eyebrow, title, children }: { eyebrow?: string; title: string; children?: ReactNode }) {
+export function PageHeader({ eyebrow, title, children }: { eyebrow?: ReactNode; title: string; children?: ReactNode }) {
   return (
     <header className="flex flex-wrap items-end justify-between gap-3 pb-5 pt-6">
       <div className="min-w-0">
@@ -179,7 +179,7 @@ export function Toasts() {
         <div
           key={x.id}
           className={cx(
-            'toast-in pointer-events-auto max-w-md rounded-full px-4 py-2 text-sm font-semibold shadow-lg',
+            'toast-in pointer-events-none max-w-md rounded-full px-4 py-2 text-sm font-semibold shadow-lg',
             x.tone === 'ok' && 'bg-band text-band-ink',
             x.tone === 'warn' && 'bg-warn text-bg',
             x.tone === 'error' && 'bg-bad text-bg',

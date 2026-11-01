@@ -1,4 +1,4 @@
-import type { AppState, Drill, Level, Log, Plan, Player, Role, Session, Thresholds, Tournament } from '../types';
+import type { AppState, Drill, Level, Log, Match, Plan, Player, Role, Session, Thresholds, Tournament } from '../types';
 import type { Lang } from './i18n';
 import { mergeDrills } from './drillIO';
 
@@ -24,7 +24,10 @@ export type Action =
   | { type: 'addLog'; log: Log }
   | { type: 'deleteLog'; id: string }
   | { type: 'addTournament'; tournament: Tournament }
-  | { type: 'removeTournament'; id: string };
+  | { type: 'upsertTournament'; tournament: Tournament }
+  | { type: 'removeTournament'; id: string }
+  | { type: 'saveMatch'; match: Match }
+  | { type: 'deleteMatch'; id: string };
 
 const now = () => new Date().toISOString();
 
@@ -55,6 +58,7 @@ export function reducer(state: AppState, action: Action): AppState {
         plans: state.plans.filter((p) => p.playerId !== action.id),
         logs: state.logs.filter((l) => l.playerId !== action.id),
         tournaments: state.tournaments.filter((t) => t.playerId !== action.id),
+        matches: state.matches.filter((m) => m.playerId !== action.id),
         settings: { ...state.settings, activePlayerId: state.settings.activePlayerId === action.id ? players[0]?.id ?? '' : state.settings.activePlayerId },
       };
     }
@@ -110,9 +114,24 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'deleteLog':
       return { ...state, logs: state.logs.filter((l) => l.id !== action.id) };
     case 'addTournament':
-      return { ...state, tournaments: [...state.tournaments, action.tournament].sort((a, b) => a.start.localeCompare(b.start)) };
+    case 'upsertTournament': {
+      const others = state.tournaments.filter((t) => t.id !== action.tournament.id);
+      return { ...state, tournaments: [...others, action.tournament].sort((a, b) => a.start.localeCompare(b.start)) };
+    }
     case 'removeTournament':
-      return { ...state, tournaments: state.tournaments.filter((t) => t.id !== action.id) };
+      // Matches played there stay with the player; they just lose the link.
+      return {
+        ...state,
+        tournaments: state.tournaments.filter((t) => t.id !== action.id),
+        matches: state.matches.map((m) => (m.tournamentId === action.id ? { ...m, tournamentId: null, updatedAt: now() } : m)),
+      };
+    case 'saveMatch': {
+      const m = { ...action.match, updatedAt: now() };
+      const exists = state.matches.some((x) => x.id === m.id);
+      return { ...state, matches: exists ? state.matches.map((x) => (x.id === m.id ? m : x)) : [...state.matches, m] };
+    }
+    case 'deleteMatch':
+      return { ...state, matches: state.matches.filter((m) => m.id !== action.id) };
     default:
       return state;
   }

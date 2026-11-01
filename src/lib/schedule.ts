@@ -1,5 +1,8 @@
 import type { Session, Tournament } from '../types';
 
+/** Only the dates matter for scheduling. */
+export type DateWindow = Pick<Tournament, 'start' | 'end'>;
+
 export function toISO(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -22,17 +25,17 @@ export function todayISO(): string {
   return toISO(new Date());
 }
 
-export function inTournament(iso: string, t: Tournament): boolean {
+export function inTournament(iso: string, t: DateWindow): boolean {
   return iso >= t.start && iso <= t.end;
 }
 
-export function tournamentOn(iso: string, tournaments: Tournament[]): Tournament | undefined {
+export function tournamentOn<T extends DateWindow>(iso: string, tournaments: T[]): T | undefined {
   return tournaments.find((t) => inTournament(iso, t));
 }
 
 /** Sessions scheduled on a tournament day (completed/skipped sessions are ignored). */
-export function findConflicts(sessions: Session[], tournaments: Tournament[]): { session: Session; tournament: Tournament }[] {
-  const out: { session: Session; tournament: Tournament }[] = [];
+export function findConflicts<T extends DateWindow>(sessions: Session[], tournaments: T[]): { session: Session; tournament: T }[] {
+  const out: { session: Session; tournament: T }[] = [];
   for (const s of sessions) {
     if (s.status !== 'planned') continue;
     const t = tournamentOn(s.date, tournaments);
@@ -42,8 +45,8 @@ export function findConflicts(sessions: Session[], tournaments: Tournament[]): {
 }
 
 /** Planned sessions in the 2 days before a tournament start — coach should taper volume. */
-export function taperWarnings(sessions: Session[], tournaments: Tournament[]): { session: Session; tournament: Tournament }[] {
-  const out: { session: Session; tournament: Tournament }[] = [];
+export function taperWarnings<T extends DateWindow>(sessions: Session[], tournaments: T[]): { session: Session; tournament: T }[] {
+  const out: { session: Session; tournament: T }[] = [];
   for (const s of sessions) {
     if (s.status !== 'planned') continue;
     for (const t of tournaments) {
@@ -58,7 +61,7 @@ export function taperWarnings(sessions: Session[], tournaments: Tournament[]): {
  * first free day after the tournament; later sessions are pushed so dates stay
  * strictly increasing and never land on another tournament. Completed sessions are untouched.
  */
-export function rescheduleAroundTournaments(sessions: Session[], tournaments: Tournament[]): Session[] {
+export function rescheduleAroundTournaments(sessions: Session[], tournaments: DateWindow[]): Session[] {
   const sorted = [...sessions].sort((a, b) => a.index - b.index);
   let lastDate = '';
   return sorted.map((s) => {
@@ -81,7 +84,7 @@ export function rescheduleAroundTournaments(sessions: Session[], tournaments: To
 }
 
 /** Generate `count` training dates from `start` on the given weekdays (0=Sun), skipping tournament days. */
-export function generateDates(start: string, count: number, weekdays: number[], tournaments: Tournament[]): string[] {
+export function generateDates(start: string, count: number, weekdays: number[], tournaments: DateWindow[]): string[] {
   const days = weekdays.length ? weekdays : [1, 3, 5];
   const out: string[] = [];
   let cur = start;

@@ -8,6 +8,61 @@ import { stats } from '../lib/selectors';
 import { uid } from '../lib/id';
 import { Badge, Button, Card, cx, Empty, KpiTile, PageHeader, SectionTitle } from '../components/ui';
 import { ParentConnect } from '../components/ParentLink';
+import { daysBetween, evaluateTournament, matchesOfPlayer } from '../lib/competition';
+import { GoalChip, ResultBadge, scoreLine } from '../components/MatchBits';
+import { goalTitle } from './TournamentDetail';
+
+/** What parents most want to know: the next tournament and its goals, live or last match. */
+function CompeteSummary({ playerId }: { playerId: string }) {
+  const { state, t, lang } = useStore();
+  const today = todayISO();
+  const next = state.tournaments.filter((x) => x.playerId === playerId && x.end >= today).sort((a, b) => a.start.localeCompare(b.start))[0];
+  const all = matchesOfPlayer(state, playerId);
+  const live = all.filter((m) => m.status === 'live');
+  const last = [...all].reverse().find((m) => m.status === 'done');
+  if (!next && !all.length) return null;
+  const ev = next ? evaluateTournament(state, next, today) : null;
+  const drills = drillMap(state);
+  const days = next ? daysBetween(today, next.start) : 0;
+  return (
+    <section className="mb-8 grid gap-4 md:grid-cols-2" data-testid="parent-compete">
+      {next && ev && (
+        <Card className="p-5" as="article">
+          <div className="eyebrow mb-1">{t('nextTournament')}</div>
+          <a href={href(`tournament-${next.id}`)} className="font-display text-2xl leading-tight hover:text-accent">{next.name}</a>
+          <p className="num mt-1 text-sm text-muted">
+            {formatDate(lang, next.start, { day: 'numeric', month: 'short' })}–{formatDate(lang, next.end, { day: 'numeric', month: 'short' })} ·{' '}
+            {next.start > today ? (days === 1 ? t('startsTomorrow') : t('startsIn', { n: days })) : t('inProgress')} · {t(`aim_${next.aim}` as DictKey)}
+          </p>
+          {ev.evals.length > 0 && (
+            <ul className="mt-3 flex flex-col gap-1.5">
+              {ev.evals.map(({ goal, ev: e }) => (
+                <li key={goal.id} className="flex items-start gap-2 text-sm">
+                  <span className="ui-bidi min-w-0 flex-1">{goalTitle(goal, t, (id) => drills.get(id)?.name ?? id)}</span>
+                  <GoalChip status={e.status} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
+      {(live.length > 0 || last) && (
+        <Card className="p-5" as="article">
+          <div className="eyebrow mb-2">{live.length ? t('live') : t('lastMatch')}</div>
+          {[...live, ...(live.length ? [] : last ? [last] : [])].map((m) => (
+            <a key={m.id} href={href(`match-${m.id}`)} className="flex flex-wrap items-center gap-2 hover:text-accent">
+              <ResultBadge m={m} />
+              <span className="num font-mono text-lg font-semibold" dir="ltr">{scoreLine(m, t)}</span>
+              <span className="min-w-0 flex-1 truncate">{t('vsName', { name: m.opponent || t('opponent') })}</span>
+              <span className="num text-[13px] text-muted">{formatDate(lang, m.date, { day: 'numeric', month: 'short' })}</span>
+            </a>
+          ))}
+          <a href={href('matches')} className="mt-3 inline-block text-sm font-semibold text-accent">{t('competeTitle')} →</a>
+        </Card>
+      )}
+    </section>
+  );
+}
 
 export function ParentView() {
   const { state, dispatch, t, lang, toast, adapter } = useStore();
@@ -53,6 +108,8 @@ export function ParentView() {
           )}
         </Card>
       )}
+
+      <CompeteSummary playerId={player.id} />
 
       <SectionTitle>{t('calendar')}</SectionTitle>
       {!plan ? (

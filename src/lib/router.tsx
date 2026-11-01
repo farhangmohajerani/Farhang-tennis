@@ -22,7 +22,7 @@ export function useRoute(): { name: string; param: string } {
   return parseRoute(route);
 }
 
-const PREFIXED = ['drill', 'session', 'planner'] as const;
+const PREFIXED = ['drill', 'session', 'planner', 'newmatch', 'match', 'tournament'] as const;
 
 export function parseRoute(route: string): { name: string; param: string } {
   for (const p of PREFIXED) {

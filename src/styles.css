@@ -167,6 +167,24 @@ h3 {
     font: inherit;
     color: inherit;
   }
+  /* Tables inherit text colour/size even if the page is ever rendered in quirks mode. */
+  table {
+    color: inherit;
+    font-size: inherit;
+  }
+}
+.live-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: tp-live 1.4s ease-in-out infinite;
+}
+@keyframes tp-live {
+  50% {
+    opacity: 0.25;
+  }
 }
 /* iOS Safari zooms inputs under 16px */
 input,
@@ -196,6 +214,16 @@ textarea {
   .savebar {
     margin-left: auto;
     margin-right: auto;
+  }
+}
+/* Live scoreboard stays visible while charting on phones (below the 52px header); static on tablets/desktop. */
+.live-sticky {
+  position: sticky;
+  top: calc(env(safe-area-inset-top, 0px) + 52px);
+}
+@media (min-width: 768px) {
+  .live-sticky {
+    position: static;
   }
 }
 body::before {
@@ -230,5 +258,13 @@ body::before {
 /* Drill content is English in v1: let each text run pick its own direction inside the RTL layout
    so Latin text keeps correct punctuation order ("4. Deep topspin", not "Deep topspin .4"). */
 [dir='rtl'] :is(h1, h2, h3, h4, p, li, a, span, dd, dt, td, th, blockquote, option, label) {
+  unicode-bidi: plaintext;
+}
+/* UI sentences in the interface language that may start with a Latin name ("Ela: وینر"): keep the RTL order. */
+[dir='rtl'] .ui-bidi {
+  unicode-bidi: isolate;
+}
+/* Typed text follows its own language (English notes keep their punctuation at the end). */
+[dir='rtl'] :is(textarea, input:not([type]), input[type='text'], input[type='search']) {
   unicode-bidi: plaintext;
 }

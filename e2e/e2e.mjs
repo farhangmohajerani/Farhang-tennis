@@ -306,8 +306,172 @@ async function run(engineName) {
     await page.getByRole('cell', { name: '≥42%' }).waitFor();
   });
 
+  await step('matches: record, season statistics and match list from the demo', async () => {
+    await setRole('coach');
+    await go('matches');
+    assert.match(await page.getByTestId('record').innerText(), /2–1/);
+    assert.equal(await page.getByTestId('season-stats').locator(':scope > div').count(), 8);
+    assert.equal(await page.getByTestId('match-list').locator('[data-match-id]').count(), 3);
+    await page.getByTestId('tab-tournaments').click();
+    await page.getByTestId('upcoming-tournaments').waitFor();
+    assert.equal(await page.getByTestId('past-tournaments').locator('[data-tournament-id]').count(), 1);
+  });
+
+  await step('tournament goals: evaluated from matches, add, mark and remove goals', async () => {
+    await go('tournament-tour-demo-past');
+    await page.getByText('Reached: Round of 16').first().waitFor();
+    assert.ok(await page.locator('[data-goal-status="met"]').count() >= 1);
+    assert.ok(await page.locator('[data-goal-status="missed"]').count() >= 1);
+    await go('tournament-tour-demo');
+    const goals = () => page.getByTestId('goal-list').locator(':scope > li').count();
+    const before = await goals();
+    await page.getByTestId('goal-kind-stat').click();
+    await page.selectOption('#goal-metric', 'doubleFaults');
+    assert.equal(await page.inputValue('#goal-op'), 'lte');
+    await page.fill('#goal-value', '3');
+    await page.getByTestId('add-goal').click();
+    assert.equal(await goals(), before + 1);
+    await page.getByText('Double faults ≤ 3 per match').waitFor();
+    await page.getByTestId('goal-kind-custom').click();
+    await page.fill('#goal-text', 'Breathe between points');
+    await page.getByTestId('add-goal').click();
+    assert.equal(await goals(), before + 2);
+    const custom = page.locator('[data-goal-kind="custom"]').last();
+    await custom.getByTestId('mark-true').click();
+    await page.locator('[data-goal-kind="custom"][data-goal-status="met"]').last().waitFor();
+    await page.getByRole('button', { name: 'Remove Breathe between points' }).click();
+    assert.equal(await goals(), before + 1);
+    await page.getByTestId('aim-training').click();
+    assert.equal(await page.getByTestId('aim-training').getAttribute('aria-checked'), 'true');
+  });
+
+  let liveId = '';
+  await step('match tracker: serve, fault, double fault, winner, detail, undo, reload', async () => {
+    await go('newmatch');
+    await page.fill('#m-opponent', 'Test Opponent');
+    await page.getByTestId('preset-oneSet').click();
+    await page.selectOption('#m-games', '4');
+    await page.getByTestId('match-submit').click();
+    await page.getByTestId('scoreboard').waitFor();
+    liveId = page.url().split('#match-')[1];
+    const pts = async () => [await page.getByTestId('points-p').innerText(), await page.getByTestId('points-o').innerText()];
+    await page.getByTestId('ace').click();
+    assert.deepEqual(await pts(), ['15', '0']);
+    await page.getByTestId('fault').click();
+    assert.match(await page.getByTestId('serve-status').innerText(), /2nd serve/);
+    await page.getByTestId('double-fault').click();
+    assert.deepEqual(await pts(), ['15', '15']);
+    await page.getByTestId('serve-in').click();
+    await page.getByTestId('o-returnError').waitFor({ state: 'detached' }).catch(() => {});
+    await page.getByTestId('p-winner').click();
+    assert.deepEqual(await pts(), ['30', '15']);
+    await page.getByTestId('shot-fh').click();
+    await page.getByTestId('rally-mid').click();
+    await page.getByTestId('net-toggle').click();
+    assert.match(await page.getByTestId('last-point').innerText(), /Winner · Forehand/);
+    assert.equal(await page.getByTestId('net-toggle').getAttribute('aria-pressed'), 'true');
+    await page.getByTestId('undo-point').click();
+    assert.deepEqual(await pts(), ['15', '15']);
+    await page.getByTestId('serve-in').click();
+    await page.getByTestId('p-unforcedError').click(); // opponent's unforced error
+    assert.deepEqual(await pts(), ['30', '15']);
+    await page.reload();
+    await page.getByTestId('scoreboard').waitFor();
+    assert.deepEqual(await pts(), ['30', '15']);
+  });
+
+  await step('match tracker: the set is won 4-0, the report shows score and statistics', async () => {
+    for (let i = 0; i < 40 && !(await page.getByTestId('final-score').count()); i++) {
+      await page.getByTestId('serve-in').click();
+      await page.getByTestId('p-winner').click();
+    }
+    await page.getByTestId('final-score').waitFor();
+    assert.equal(await page.getByTestId('score-line').innerText(), '4-0');
+    await page.getByTestId('stats-table').waitFor();
+    const aces = await page.getByTestId('stats-table').getByRole('row').filter({ hasText: 'Aces' }).innerText();
+    assert.match(aces, /^\s*1\b/);
+    await page.getByTestId('momentum').waitFor();
+    await page.getByTestId('reopen-match').click(); // undo the match-winning point
+    await page.getByTestId('scoreboard').waitFor();
+    await page.getByTestId('serve-in').click();
+    await page.getByTestId('p-winner').click();
+    await page.getByTestId('final-score').waitFor();
+    await page.fill('#match-notes', 'Served well at 30-30.');
+    await page.getByTestId('save-match-notes').click();
+    await page.reload();
+    await page.getByTestId('final-score').waitFor();
+    assert.equal(await page.inputValue('#match-notes'), 'Served well at 30-30.');
+  });
+
+  await step('final score only: tie-break notation and the tournament result goal', async () => {
+    await go('newmatch-tour-demo');
+    assert.equal(await page.getByTestId('mt-official').getAttribute('aria-checked'), 'true');
+    assert.equal(await page.inputValue('#m-tournament'), 'tour-demo');
+    await page.selectOption('#m-round', 'QF');
+    await page.fill('#m-opponent', 'Score Only');
+    await page.getByTestId('mode-score').click();
+    await page.fill('#set-0-p', '7');
+    await page.fill('#set-0-o', '6');
+    await page.fill('#set-0-tb', '5');
+    await page.fill('#set-1-p', '6');
+    await page.fill('#set-1-o', '3');
+    assert.match(await page.getByTestId('score-winner').innerText(), /Winner: Ela Demir/);
+    await page.getByTestId('match-submit').click();
+    await page.getByTestId('final-score').waitFor();
+    assert.equal(await page.getByTestId('score-line').innerText(), '7-6(5) 6-3');
+    await go('tournament-tour-demo');
+    await page.getByText('Reached: Semi-final').first().waitFor();
+    await page.locator('[data-goal-kind="outcome"][data-goal-status="met"]').waitFor();
+    assert.equal(await page.getByTestId('tournament-matches').locator('[data-match-id]').count(), 1);
+  });
+
+  await step('end a match early (retirement)', async () => {
+    await go('newmatch');
+    await page.fill('#m-opponent', 'Retires');
+    await page.getByTestId('match-submit').click();
+    await page.getByTestId('serve-in').click();
+    await page.getByTestId('p-winner').click();
+    await page.getByTestId('finish-early').click();
+    await page.getByTestId('reason-retired').check();
+    await page.getByTestId('finish-winner-p').check();
+    await page.getByTestId('confirm-finish').click();
+    await page.getByTestId('final-score').waitFor();
+    assert.match(await page.getByTestId('score-line').innerText(), /ret\./);
+  });
+
+  await step('parent: matches and tournaments are read-only', async () => {
+    await setRole('parent');
+    await go('matches');
+    assert.equal(await page.getByTestId('new-match').count(), 0);
+    await go(`match-${liveId}`);
+    await page.getByTestId('final-score').waitFor();
+    assert.equal(await page.getByTestId('edit-match').count(), 0);
+    assert.equal(await page.locator('#match-notes').count(), 0);
+    await page.getByText('Served well at 30-30.').waitFor();
+    await go('tournament-tour-demo');
+    assert.equal(await page.getByTestId('goal-adder').count(), 0);
+    assert.equal(await page.getByTestId('add-goal').count(), 0);
+    await go('newmatch');
+    await page.getByText('Only coaches can add or chart matches.').waitFor();
+    await go('parent');
+    await page.getByTestId('parent-compete').waitFor();
+    await setRole('coach');
+  });
+
+  await step('Persian: match and tournament pages', async () => {
+    await page.getByTestId('lang-toggle').click();
+    for (const r of ['matches', 'tournaments', 'tournament-tour-demo', 'match-match-demo-1', 'newmatch']) {
+      await go(r);
+      const o = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      assert.ok(o <= 0, `${r} overflows by ${o}px in Persian`);
+    }
+    await go('matches');
+    await page.getByText('مسابقه‌ها و تورنمنت‌ها').first().waitFor();
+    await page.getByTestId('lang-toggle').click();
+  });
+
   await step('no horizontal overflow on any page', async () => {
-    for (const r of ['dashboard', 'library', 'drill-fh-005', 'planner', 'session', 'parent', 'progress', 'admin']) {
+    for (const r of ['dashboard', 'library', 'drill-fh-005', 'planner', 'session', 'parent', 'progress', 'admin', 'matches', 'tournaments', 'tournament-tour-demo', 'match-match-demo-1', 'newmatch']) {
       await go(r);
       const o = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       assert.ok(o <= 0, `${r} overflows by ${o}px`);

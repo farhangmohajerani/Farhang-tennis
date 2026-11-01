@@ -8,6 +8,10 @@ import { SessionExec } from './pages/SessionExec';
 import { ParentView } from './pages/ParentView';
 import { Progress } from './pages/Progress';
 import { Admin } from './pages/Admin';
+import { Compete } from './pages/Compete';
+import { MatchPage } from './pages/MatchPage';
+import { MatchSetup } from './pages/MatchSetup';
+import { TournamentDetail } from './pages/TournamentDetail';
 
 export function App() {
   const { name, param } = useRoute();
@@ -33,6 +37,19 @@ export function App() {
       break;
     case 'admin':
       page = <Admin />;
+      break;
+    case 'matches':
+    case 'tournaments':
+      page = <Compete tab={name} />;
+      break;
+    case 'newmatch':
+      page = <MatchSetup tournamentId={param} key={param} />;
+      break;
+    case 'match':
+      page = <MatchPage id={param} key={param} />;
+      break;
+    case 'tournament':
+      page = <TournamentDetail id={param} key={param} />;
       break;
     default:
       page = <Dashboard />;

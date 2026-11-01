@@ -166,6 +166,32 @@ await step('an uninvited coach waits for approval; the admin approves; the coach
   await c2.reload();
   await c2.getByText('Alya').first().waitFor();
 });
+await step('admin charts a match; the linked parent follows the live score', async () => {
+  await owner.goto(URL_ + '#newmatch');
+  await owner.fill('#m-opponent', 'Live Opp');
+  await owner.getByTestId('match-submit').click();
+  await owner.getByTestId('scoreboard').waitFor();
+  for (let i = 0; i < 2; i++) {
+    await owner.getByTestId('serve-in').click();
+    await owner.getByTestId('p-winner').click();
+  }
+  assert.equal(await owner.getByTestId('points-p').innerText(), '30');
+  const fam = await person();
+  await fam.fill('#sb-email', 'parent@example.com');
+  await fam.fill('#sb-password', 'newpassword9');
+  await fam.getByTestId('sign-in').click();
+  await fam.getByText('Alya').first().waitFor();
+  await fam.goto(URL_ + '#matches');
+  await fam.getByTestId('live-banner').getByText('vs Live Opp').waitFor({ timeout: 15000 });
+  await fam.getByTestId('live-banner').click();
+  await fam.getByTestId('scoreboard').waitFor();
+  assert.equal(await fam.getByTestId('points-p').innerText(), '30');
+  assert.equal(await fam.getByTestId('serve-in').count(), 0, 'parents cannot chart');
+  await owner.getByTestId('serve-in').click();
+  await owner.getByTestId('p-winner').click();
+  await fam.getByTestId('points-p').getByText('40').waitFor({ timeout: 15000 });
+  assert.ok([...mock.docs.keys()].some((k) => k.startsWith('academy/data/matches/')));
+});
 console.log(`\n${passed} passed`);
 await browser.close();
 mock.server.close();

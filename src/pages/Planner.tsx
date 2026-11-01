@@ -8,6 +8,7 @@ import { findConflicts, generateDates, rescheduleAroundTournaments, taperWarning
 import { uid } from '../lib/id';
 import { Badge, Button, Card, ConfirmButton, cx, Empty, Field, Icon, inputCls, PageHeader, SectionTitle } from '../components/ui';
 import { matchesQuery } from './Library';
+import { makeTournament } from '../lib/competition';
 
 const WEEKDAYS = [1, 2, 3, 4, 5, 6, 0];
 // 2023-01-01 was a Sunday: day n of that week has getDay() === n.
@@ -471,7 +472,7 @@ function TournamentEditor({ playerId }: { playerId: string }) {
         {list.map((x) => (
           <li key={x.id} className="flex items-center gap-2 text-sm">
             <Icon.trophy className="h-4 w-4 shrink-0 text-accent" />
-            <span className="min-w-0 flex-1 truncate font-semibold">{x.name}</span>
+            <a href={href(`tournament-${x.id}`)} className="min-w-0 flex-1 truncate font-semibold hover:text-accent">{x.name}</a>
             <span className="num shrink-0 text-[12px] text-muted">
               {formatDate(lang, x.start, { day: 'numeric', month: 'short' })}–{formatDate(lang, x.end, { day: 'numeric', month: 'short' })}
             </span>
@@ -486,7 +487,7 @@ function TournamentEditor({ playerId }: { playerId: string }) {
         onSubmit={(e) => {
           e.preventDefault();
           if (!valid) return;
-          dispatch({ type: 'addTournament', tournament: { id: uid('tour'), playerId, name: f.name.trim(), start: f.start, end: f.end } });
+          dispatch({ type: 'addTournament', tournament: makeTournament({ id: uid('tour'), playerId, name: f.name.trim(), start: f.start, end: f.end }) });
           setF({ name: '', start: '', end: '' });
         }}
       >

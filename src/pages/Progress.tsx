@@ -8,6 +8,9 @@ import { baselineVsCurrent, playerLogs, stats, transferFor, type Stats } from '.
 import { computeKpis, delta, pct, starsFor, type Ratio } from '../lib/kpi';
 import { Badge, Card, cx, Empty, PageHeader, SectionTitle, Stars } from '../components/ui';
 import type { Log } from '../types';
+import { matchesOfPlayer } from '../lib/competition';
+import { matchStats, summary } from '../lib/match';
+import { ResultBadge } from '../components/MatchBits';
 
 export function Progress() {
   const { state, t, lang } = useStore();
@@ -87,6 +90,8 @@ export function Progress() {
         )}
       </section>
 
+      <MatchTrends playerId={player.id} />
+
       <section className="mt-10">
         <SectionTitle>{t('transferTitle')}</SectionTitle>
         <p className="mb-4 max-w-[65ch] text-sm text-muted">{t('transferHelp')}</p>
@@ -119,6 +124,73 @@ export function Progress() {
         </div>
       </section>
     </div>
+  );
+}
+
+/** Charted matches over time: are serve and error numbers moving the right way? */
+function MatchTrends({ playerId }: { playerId: string }) {
+  const { state, t, lang } = useStore();
+  const rows = matchesOfPlayer(state, playerId)
+    .filter((m) => m.mode === 'live' && m.points.length > 0)
+    .reverse()
+    .slice(0, 12)
+    .map((m) => ({ m, st: matchStats(m) }));
+  if (!rows.length) return null;
+  const pc = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '—');
+  const sum = (f: (x: (typeof rows)[number]) => number) => rows.reduce((a, x) => a + f(x), 0);
+  const avg = (f: (x: (typeof rows)[number]) => number) => (Math.round((sum(f) / rows.length) * 10) / 10).toString();
+  const head = [t('st_firstIn'), t('st_firstWon'), t('st_secondWon'), t('st_dfShort'), t('st_winners'), t('st_ueShort'), t('st_bpSaved')];
+  return (
+    <section className="mt-10">
+      <SectionTitle aside={<a href={href('matches')} className="text-sm font-semibold text-accent">{t('nav_matches')} →</a>}>{t('matchTrendsTitle')}</SectionTitle>
+      <p className="mb-4 max-w-[65ch] text-sm text-muted">{t('matchTrendsHelp')}</p>
+      <div className="overflow-x-auto rounded-2xl border border-line bg-surface">
+        <table className="num w-full min-w-[720px] text-sm" data-testid="match-trends">
+          <thead>
+            <tr className="border-b border-line text-[12px] text-muted">
+              <th className="px-4 py-2 text-start font-semibold">{t('date')}</th>
+              <th className="px-2 py-2 text-start font-semibold">{t('opponent')}</th>
+              {head.map((h) => (
+                <th key={h} className="px-2 py-2 text-center font-semibold">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ m, st }) => (
+              <tr key={m.id} className="border-b border-line">
+                <td className="px-4 py-2.5 whitespace-nowrap">
+                  <a href={href(`match-${m.id}`)} className="font-semibold hover:text-accent">{formatDate(lang, m.date, { day: 'numeric', month: 'short' })}</a>
+                </td>
+                <td className="px-2 py-2.5">
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <ResultBadge m={m} />
+                    <span className="font-mono text-[12px]" dir="ltr">{summary(m).text}</span>
+                    <span className="text-muted">{m.opponent}</span>
+                  </span>
+                </td>
+                <td className="px-2 text-center font-mono">{pc(st.p.firstIn, st.p.servicePoints)}</td>
+                <td className="px-2 text-center font-mono">{pc(st.p.firstWon, st.p.firstIn)}</td>
+                <td className="px-2 text-center font-mono">{pc(st.p.secondWon, st.p.secondPlayed)}</td>
+                <td className="px-2 text-center font-mono">{st.p.doubleFaults}</td>
+                <td className="px-2 text-center font-mono">{st.p.winners}</td>
+                <td className="px-2 text-center font-mono">{st.p.unforcedErrors}</td>
+                <td className="px-2 text-center font-mono">{pc(st.p.bpSaved, st.p.bpFaced)}</td>
+              </tr>
+            ))}
+            <tr className="bg-sunken font-semibold">
+              <td className="px-4 py-2.5" colSpan={2}>{t('avgRow')}</td>
+              <td className="px-2 text-center font-mono">{pc(sum((x) => x.st.p.firstIn), sum((x) => x.st.p.servicePoints))}</td>
+              <td className="px-2 text-center font-mono">{pc(sum((x) => x.st.p.firstWon), sum((x) => x.st.p.firstIn))}</td>
+              <td className="px-2 text-center font-mono">{pc(sum((x) => x.st.p.secondWon), sum((x) => x.st.p.secondPlayed))}</td>
+              <td className="px-2 text-center font-mono">{avg((x) => x.st.p.doubleFaults)}</td>
+              <td className="px-2 text-center font-mono">{avg((x) => x.st.p.winners)}</td>
+              <td className="px-2 text-center font-mono">{avg((x) => x.st.p.unforcedErrors)}</td>
+              <td className="px-2 text-center font-mono">{pc(sum((x) => x.st.p.bpSaved), sum((x) => x.st.p.bpFaced))}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 

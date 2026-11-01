@@ -135,14 +135,135 @@ export const PlanSchema = z.object({
 });
 export type Plan = z.infer<typeof PlanSchema>;
 
+/* ---------- Competition: tournaments, goals and matches ---------- */
+
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+export const SURFACES = ['hard', 'clay', 'grass', 'carpet'] as const;
+export type Surface = (typeof SURFACES)[number];
+
+/** Draw stages, earliest first. 'W' (won the title) is only a goal / result, never a match round. */
+export const ROUNDS = ['Q', 'RR', 'R128', 'R64', 'R32', 'R16', 'QF', 'SF', 'F', 'W'] as const;
+export type Round = (typeof ROUNDS)[number];
+export const MATCH_ROUNDS = ROUNDS.filter((r) => r !== 'W') as Exclude<Round, 'W'>[];
+
+/** Match statistics a tournament goal can target (evaluated from charted matches). */
+export const GOAL_METRICS = [
+  'firstServeIn',
+  'firstServeWon',
+  'secondServeWon',
+  'doubleFaults',
+  'aces',
+  'unforcedErrors',
+  'winners',
+  'returnPointsWon',
+  'breakPointsSaved',
+  'breakPointsConverted',
+  'netPointsWon',
+  'shortRallyWon',
+  'totalPointsWon',
+] as const;
+export type GoalMetric = (typeof GOAL_METRICS)[number];
+
+export const GoalSchema = z.discriminatedUnion('kind', [
+  /** Result: reach this stage of the draw (or win the title). */
+  z.object({ id: nonEmpty, kind: z.literal('outcome'), round: z.enum(ROUNDS) }),
+  /** A match statistic, e.g. first serve in ≥ 60 % or double faults ≤ 3 per match. */
+  z.object({ id: nonEmpty, kind: z.literal('stat'), metric: z.enum(GOAL_METRICS), op: z.enum(['gte', 'lte']), value: z.number().min(0).max(1000) }),
+  /** Training focus: a drill practised for this tournament, optionally with an execution target (%). */
+  z.object({ id: nonEmpty, kind: z.literal('drill'), drillId: nonEmpty, target: z.number().min(0).max(100).nullable().default(null) }),
+  /** Anything else (e.g. "same routine before every serve"); the coach marks it after the event. */
+  z.object({ id: nonEmpty, kind: z.literal('custom'), text: nonEmpty, achieved: z.boolean().nullable().default(null) }),
+]);
+export type Goal = z.infer<typeof GoalSchema>;
+
 export const TournamentSchema = z.object({
   id: nonEmpty,
   playerId: nonEmpty,
   name: nonEmpty,
-  start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  start: isoDate,
+  end: isoDate,
+  location: z.string().default(''),
+  /** e.g. ITF J60, Tennis Europe Cat 2, national, club. */
+  category: z.string().default(''),
+  surface: z.enum(SURFACES).nullable().default(null),
+  indoor: z.boolean().default(false),
+  /** What this tournament is for: results, applying training, or both. */
+  aim: z.enum(['result', 'training', 'both']).default('both'),
+  goals: z.array(GoalSchema).default([]),
+  /** Preparation notes before the event. */
+  notes: z.string().default(''),
+  /** Furthest stage reached, when matches were not recorded (otherwise computed from matches). */
+  result: z.enum(ROUNDS).nullable().default(null),
+  /** After the event: what went well, what to work on next. */
+  review: z.string().default(''),
 });
 export type Tournament = z.infer<typeof TournamentSchema>;
+
+/** How a point ended. */
+export const POINT_END = ['ace', 'serviceWinner', 'doubleFault', 'returnWinner', 'returnError', 'winner', 'forcedError', 'unforcedError', 'other'] as const;
+export type PointEnd = (typeof POINT_END)[number];
+/** Stroke of the shot that ended the point. */
+export const SHOTS = ['fh', 'bh', 'volley', 'overhead', 'drop', 'lob', 'serve'] as const;
+export type Shot = (typeof SHOTS)[number];
+/** Rally length: 0–4, 5–8, 9+ shots. */
+export const RALLY = ['short', 'mid', 'long'] as const;
+export type Rally = (typeof RALLY)[number];
+/**
+ * One point, stored compactly (6 characters) so a whole match stays small to sync on every tap:
+ * winner (p/o) · serve (1/2) · end (A ace, S service winner, D double fault, R return winner,
+ * E return error, W winner, F forced error, U unforced error, X other) · stroke (f b v o d l s, - none)
+ * · rally (s m l, - unknown) · player at net (n, -). Example: "p1Wfs-". See lib/match.ts.
+ */
+export const POINT_RE = /^[po][12][ASDREWFUX][fbvodls-][sml-][n-]$/;
+
+export const MatchFormatSchema = z.object({
+  sets: z.union([z.literal(1), z.literal(3), z.literal(5)]),
+  /** Games per set: 6 (standard) or 4 (short sets); tie-break at games-all. */
+  games: z.union([z.literal(4), z.literal(6)]),
+  /** Deciding set: a full set or a 10-point match tie-break. */
+  finalSet: z.enum(['full', 'mtb']),
+  noAd: z.boolean(),
+});
+export type MatchFormat = z.infer<typeof MatchFormatSchema>;
+
+/** A set score from the player's side. `tb` = tie-break points of the set's loser (7-6(5)); for a match tie-break, p/o hold the points. */
+export const SetScoreSchema = z.object({
+  p: z.number().int().min(0).max(99),
+  o: z.number().int().min(0).max(99),
+  tb: z.number().int().min(0).max(99).nullable().default(null),
+});
+export type SetScore = z.infer<typeof SetScoreSchema>;
+
+export const MatchSchema = z.object({
+  id: nonEmpty,
+  playerId: nonEmpty,
+  date: isoDate,
+  kind: z.enum(['practice', 'official']),
+  tournamentId: z.string().nullable().default(null),
+  round: z.enum(ROUNDS).nullable().default(null),
+  opponent: z.string().default(''),
+  /** Free text: UTR 9.5, ITF 420, club level… */
+  opponentRating: z.string().default(''),
+  opponentHand: z.enum(['right', 'left']).nullable().default(null),
+  surface: z.enum(SURFACES).nullable().default(null),
+  indoor: z.boolean().default(false),
+  format: MatchFormatSchema,
+  firstServer: z.enum(['p', 'o']),
+  /** live = charted point by point; score = final score only. */
+  mode: z.enum(['live', 'score']),
+  points: z.array(z.string().regex(POINT_RE)).default([]),
+  /** Final set scores when mode is 'score'. */
+  sets: z.array(SetScoreSchema).default([]),
+  status: z.enum(['live', 'done']),
+  endReason: z.enum(['completed', 'retired', 'stopped']).default('completed'),
+  /** Winner when finished early or entered as a score (charted matches compute it). */
+  winner: z.enum(['p', 'o']).nullable().default(null),
+  notes: z.string().default(''),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type Match = z.infer<typeof MatchSchema>;
 
 export const ERROR_TYPES = ['net', 'long', 'wide', 'wrongChoice', 'late', 'other'] as const;
 export type ErrorType = (typeof ERROR_TYPES)[number];
@@ -184,6 +305,7 @@ export const AppStateSchema = z.object({
   plans: z.array(PlanSchema),
   tournaments: z.array(TournamentSchema),
   logs: z.array(LogSchema),
+  matches: z.array(MatchSchema).default([]),
   settings: SettingsSchema,
 });
 export type AppState = z.infer<typeof AppStateSchema>;
