@@ -162,6 +162,10 @@ export const GOAL_METRICS = [
   'netPointsWon',
   'shortRallyWon',
   'totalPointsWon',
+  'deuceServeWon',
+  'adServeWon',
+  'deuceReturnWon',
+  'adReturnWon',
 ] as const;
 export type GoalMetric = (typeof GOAL_METRICS)[number];
 
@@ -203,19 +207,31 @@ export type Tournament = z.infer<typeof TournamentSchema>;
 /** How a point ended. */
 export const POINT_END = ['ace', 'serviceWinner', 'doubleFault', 'returnWinner', 'returnError', 'winner', 'forcedError', 'unforcedError', 'other'] as const;
 export type PointEnd = (typeof POINT_END)[number];
-/** Stroke of the shot that ended the point. */
-export const SHOTS = ['fh', 'bh', 'volley', 'overhead', 'drop', 'lob', 'serve'] as const;
-export type Shot = (typeof SHOTS)[number];
+/** Forehand or backhand side of the shot that ended the point. */
+export const WINGS = ['fh', 'bh'] as const;
+export type Wing = (typeof WINGS)[number];
+/** Kind of shot that ended the point (returns use drive or slice). */
+export const SHOT_TYPES = ['drive', 'slice', 'drop', 'lob', 'approach', 'pass', 'volley', 'halfVolley', 'overhead', 'serve'] as const;
+export type ShotType = (typeof SHOT_TYPES)[number];
+/** Where the serve that started the point went. */
+export const SERVE_DIRS = ['wide', 'body', 't'] as const;
+export type ServeDir = (typeof SERVE_DIRS)[number];
+/** Court the point was served to — follows from the score (even points deuce court, odd points ad court). */
+export const COURT_SIDES = ['deuce', 'ad'] as const;
+export type CourtSide = (typeof COURT_SIDES)[number];
 /** Rally length: 0–4, 5–8, 9+ shots. */
 export const RALLY = ['short', 'mid', 'long'] as const;
 export type Rally = (typeof RALLY)[number];
 /**
- * One point, stored compactly (6 characters) so a whole match stays small to sync on every tap:
+ * One point, stored compactly (8 characters) so a whole match stays small to sync on every tap:
  * winner (p/o) · serve (1/2) · end (A ace, S service winner, D double fault, R return winner,
- * E return error, W winner, F forced error, U unforced error, X other) · stroke (f b v o d l s, - none)
- * · rally (s m l, - unknown) · player at net (n, -). Example: "p1Wfs-". See lib/match.ts.
+ * E return error, W winner, F forced error, U unforced error, X other) · wing (f b, - none)
+ * · shot (d drive, c slice, p drop, l lob, a approach, x pass, v volley, h half-volley, o overhead,
+ * s serve, - none) · rally (s m l, -) · player at net (n, -) · serve direction (w wide, b body, t T, -).
+ * Example: "p1Wfvmnt". Matches charted before November 2026 use the older 6-character code
+ * (winner, serve, end, stroke f b v o d l s, rally, net), which is still read. See lib/match.ts.
  */
-export const POINT_RE = /^[po][12][ASDREWFUX][fbvodls-][sml-][n-]$/;
+export const POINT_RE = /^(?:[po][12][ASDREWFUX][fb-][dcplaxvhos-][sml-][n-][wbt-]|[po][12][ASDREWFUX][fbvodls-][sml-][n-])$/;
 
 export const MatchFormatSchema = z.object({
   sets: z.union([z.literal(1), z.literal(3), z.literal(5)]),

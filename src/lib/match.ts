@@ -6,8 +6,8 @@
  * The score is never stored: it is replayed from the point list, so undoing or deleting a point,
  * or correcting who served first, always gives a consistent score and consistent statistics.
  */
-import type { GoalMetric, Match, MatchFormat, PointEnd, Rally, SetScore, Shot } from '../types';
-import { RALLY, SHOTS } from '../types';
+import type { CourtSide, GoalMetric, Match, MatchFormat, PointEnd, Rally, ServeDir, SetScore, ShotType, Wing } from '../types';
+import { COURT_SIDES, RALLY, SERVE_DIRS, WINGS } from '../types';
 
 export type Side = 'p' | 'o';
 export const other = (s: Side): Side => (s === 'p' ? 'o' : 'p');
@@ -17,10 +17,15 @@ export interface Point {
   /** 1 = decided on the first serve; 2 = after a first-serve fault (includes double faults). */
   serve: 1 | 2;
   end: PointEnd;
-  shot: Shot | null;
+  /** Forehand / backhand of the point-ending shot. */
+  wing: Wing | null;
+  /** Kind of point-ending shot (drive, slice, drop shot, volley…). */
+  shot: ShotType | null;
   rally: Rally | null;
   /** The charted player came to the net during the point. */
   net: boolean;
+  /** Where the serve that started the point went (not for double faults). */
+  dir: ServeDir | null;
 }
 
 /* ---------- compact codes ---------- */
@@ -36,28 +41,52 @@ const END_CODE: Record<PointEnd, string> = {
   unforcedError: 'U',
   other: 'X',
 };
-const SHOT_CODE: Record<Shot, string> = { fh: 'f', bh: 'b', volley: 'v', overhead: 'o', drop: 'd', lob: 'l', serve: 's' };
+const WING_CODE: Record<Wing, string> = { fh: 'f', bh: 'b' };
+const SHOT_CODE: Record<ShotType, string> = { drive: 'd', slice: 'c', drop: 'p', lob: 'l', approach: 'a', pass: 'x', volley: 'v', halfVolley: 'h', overhead: 'o', serve: 's' };
 const RALLY_CODE: Record<Rally, string> = { short: 's', mid: 'm', long: 'l' };
+const DIR_CODE: Record<ServeDir, string> = { wide: 'w', body: 'b', t: 't' };
 function invert<K extends string>(m: Record<K, string>): Record<string, K> {
   return Object.fromEntries(Object.entries(m).map(([k, v]) => [v, k])) as Record<string, K>;
 }
 const END_OF = invert(END_CODE);
+const WING_OF = invert(WING_CODE);
 const SHOT_OF = invert(SHOT_CODE);
 const RALLY_OF = invert(RALLY_CODE);
+const DIR_OF = invert(DIR_CODE);
+/** The older 6-character code had one stroke letter: forehand, backhand, volley, overhead, drop, lob, serve. */
+const LEGACY_STROKE: Record<string, [Wing | null, ShotType | null]> = {
+  f: ['fh', 'drive'],
+  b: ['bh', 'drive'],
+  v: [null, 'volley'],
+  o: [null, 'overhead'],
+  d: [null, 'drop'],
+  l: [null, 'lob'],
+  s: [null, 'serve'],
+};
 
 export function encodePoint(p: Point): string {
-  return `${p.win}${p.serve}${END_CODE[p.end]}${p.shot ? SHOT_CODE[p.shot] : '-'}${p.rally ? RALLY_CODE[p.rally] : '-'}${p.net ? 'n' : '-'}`;
+  return `${p.win}${p.serve}${END_CODE[p.end]}${p.wing ? WING_CODE[p.wing] : '-'}${p.shot ? SHOT_CODE[p.shot] : '-'}${p.rally ? RALLY_CODE[p.rally] : '-'}${p.net ? 'n' : '-'}${p.dir ? DIR_CODE[p.dir] : '-'}`;
 }
 
 export function decodePoint(code: string): Point {
+  const base = { win: (code[0] === 'o' ? 'o' : 'p') as Side, serve: (code[1] === '2' ? 2 : 1) as 1 | 2, end: END_OF[code[2]] ?? 'other' };
+  if (code.length === 6) {
+    const [wing, shot] = LEGACY_STROKE[code[3]] ?? [null, null];
+    return { ...base, wing, shot, rally: RALLY_OF[code[4]] ?? null, net: code[5] === 'n', dir: null };
+  }
   return {
-    win: code[0] === 'o' ? 'o' : 'p',
-    serve: code[1] === '2' ? 2 : 1,
-    end: END_OF[code[2]] ?? 'other',
-    shot: SHOT_OF[code[3]] ?? null,
-    rally: RALLY_OF[code[4]] ?? null,
-    net: code[5] === 'n',
+    ...base,
+    wing: WING_OF[code[3]] ?? null,
+    shot: SHOT_OF[code[4]] ?? null,
+    rally: RALLY_OF[code[5]] ?? null,
+    net: code[6] === 'n',
+    dir: DIR_OF[code[7]] ?? null,
   };
+}
+
+/** A point with nothing but its result (detail is added afterwards). */
+export function bare(win: Side, serve: 1 | 2, end: PointEnd, extra: Partial<Point> = {}): Point {
+  return { win, serve, end, wing: null, shot: null, rally: null, net: false, dir: null, ...extra };
 }
 
 /** Points that end on the serve or the return are 0–4 shot rallies by definition. */
@@ -227,8 +256,17 @@ export interface PointCtx {
   game: { p: number; o: number };
   tiebreak: boolean;
   breakPoint: boolean;
+  /** Court the point was served to; null for a no-ad deciding point (the receiver picks the side). */
+  court: CourtSide | null;
   gameWinner: Side | null;
   setWinner: Side | null;
+}
+
+/** Deuce court after an even number of points in the game or tie-break, ad court after an odd number. */
+export function courtOf(e: Engine): CourtSide | null {
+  const { p, o } = e.game;
+  if (!e.tb && e.format.noAd && p === 3 && o === 3) return null;
+  return (p + o) % 2 === 0 ? 'deuce' : 'ad';
 }
 
 export interface Replay {
@@ -252,6 +290,7 @@ export function replay(m: Pick<Match, 'format' | 'firstServer' | 'points'>): Rep
       game: { ...e.game },
       tiebreak: !!e.tb,
       breakPoint: isBreakPoint(e),
+      court: courtOf(e),
       gameWinner: null,
       setWinner: null,
     };
@@ -379,6 +418,28 @@ export interface SideStats {
   returnGamesWon: number;
 }
 
+/** Serve and return by court side, for one player. */
+export interface CourtStats {
+  servePlayed: number;
+  serveWon: number;
+  firstIn: number;
+  aces: number;
+  doubleFaults: number;
+  returnPlayed: number;
+  returnWon: number;
+}
+
+/** Point-ending shots of one kind (e.g. backhand volley) for one player. */
+export interface StrokeRow {
+  wing: Wing | null;
+  shot: ShotType | null;
+  /** Return of serve (shot is then drive or slice). */
+  ret: boolean;
+  winners: number;
+  forced: number;
+  unforced: number;
+}
+
 export interface MatchStats {
   /** Charted matches included. */
   matches: number;
@@ -389,8 +450,14 @@ export interface MatchStats {
   net: { played: number; won: number };
   /** Points by rally length, won by the charted player. */
   rally: Record<Rally, { played: number; won: number }>;
-  /** The charted player's point-ending shots by stroke. */
-  strokes: Record<Shot, { winners: number; errors: number }>;
+  /** Serve and return per court side, for each player. */
+  court: Record<Side, Record<CourtSide, CourtStats>>;
+  /** Return winners and errors by forehand / backhand, for each player. */
+  returns: Record<Side, Record<Wing | 'unknown', { winners: number; errors: number }>>;
+  /** Point-ending rally and return shots by kind, for each player (key from strokeKey). */
+  strokes: Record<Side, Record<string, StrokeRow>>;
+  /** Serve direction per court side: points played and won by the server, for each player. */
+  serveDir: Record<Side, Record<CourtSide, Record<ServeDir, { played: number; won: number }>>>;
   /** Running (player points − opponent points) after each point; single matches only. */
   momentum: number[];
   /** Point indexes that ended a set; single matches only. */
@@ -405,6 +472,12 @@ const SIDE_KEYS: (keyof SideStats)[] = [
 ];
 const emptySide = (): SideStats => Object.fromEntries(SIDE_KEYS.map((k) => [k, 0])) as unknown as SideStats;
 
+const emptyCourt = (): CourtStats => ({ servePlayed: 0, serveWon: 0, firstIn: 0, aces: 0, doubleFaults: 0, returnPlayed: 0, returnWon: 0 });
+const perSide = <T,>(f: () => T): Record<Side, T> => ({ p: f(), o: f() });
+const perCourt = <T,>(f: () => T): Record<CourtSide, T> => Object.fromEntries(COURT_SIDES.map((c) => [c, f()])) as Record<CourtSide, T>;
+
+export const strokeKey = (r: Pick<StrokeRow, 'wing' | 'shot' | 'ret'>) => `${r.ret ? 'r' : ''}${r.wing ?? '-'}:${r.shot ?? '-'}`;
+
 export function emptyStats(): MatchStats {
   return {
     matches: 0,
@@ -413,10 +486,20 @@ export function emptyStats(): MatchStats {
     o: emptySide(),
     net: { played: 0, won: 0 },
     rally: Object.fromEntries(RALLY.map((r) => [r, { played: 0, won: 0 }])) as MatchStats['rally'],
-    strokes: Object.fromEntries(SHOTS.map((s) => [s, { winners: 0, errors: 0 }])) as MatchStats['strokes'],
+    court: perSide(() => perCourt(emptyCourt)),
+    returns: perSide(() => ({ fh: { winners: 0, errors: 0 }, bh: { winners: 0, errors: 0 }, unknown: { winners: 0, errors: 0 } })),
+    strokes: perSide(() => ({}) as Record<string, StrokeRow>),
+    serveDir: perSide(() => perCourt(() => Object.fromEntries(SERVE_DIRS.map((d) => [d, { played: 0, won: 0 }])) as Record<ServeDir, { played: number; won: number }>)),
     momentum: [],
     setEnds: [],
   };
+}
+
+function addStroke(st: MatchStats, side: Side, row: Omit<StrokeRow, 'winners' | 'forced' | 'unforced'>, kind: 'winners' | 'forced' | 'unforced', n = 1) {
+  const key = strokeKey(row);
+  const map = st.strokes[side];
+  if (!map[key]) map[key] = { ...row, winners: 0, forced: 0, unforced: 0 };
+  map[key][kind] += n;
 }
 
 export function statsFromReplay(r: Replay): MatchStats {
@@ -495,9 +578,30 @@ export function statsFromReplay(r: Replay): MatchStats {
       st.rally[rl].played++;
       if (pt.win === 'p') st.rally[rl].won++;
     }
-    if (pt.shot && hitterOf(pt, s) === 'p') {
-      if (isWinnerEnd(pt.end)) st.strokes[pt.shot].winners++;
-      else if (isErrorEnd(pt.end)) st.strokes[pt.shot].errors++;
+    if (c.court) {
+      const CS = st.court[s][c.court];
+      const CR = st.court[rcv][c.court];
+      CS.servePlayed++;
+      CR.returnPlayed++;
+      if (pt.win === s) CS.serveWon++;
+      else CR.returnWon++;
+      if (pt.serve === 1) CS.firstIn++;
+      if (pt.end === 'ace') CS.aces++;
+      if (pt.end === 'doubleFault') CS.doubleFaults++;
+      if (pt.dir && pt.end !== 'doubleFault') {
+        const d = st.serveDir[s][c.court][pt.dir];
+        d.played++;
+        if (pt.win === s) d.won++;
+      }
+    }
+    if (pt.end === 'returnWinner' || pt.end === 'returnError') {
+      const r = st.returns[rcv][pt.wing ?? 'unknown'];
+      if (pt.end === 'returnWinner') r.winners++;
+      else r.errors++;
+      addStroke(st, rcv, { wing: pt.wing, shot: pt.shot === 'slice' ? 'slice' : pt.shot === 'drive' ? 'drive' : null, ret: true }, pt.end === 'returnWinner' ? 'winners' : 'unforced');
+    } else if (pt.end === 'winner' || pt.end === 'forcedError' || pt.end === 'unforcedError') {
+      const h = hitterOf(pt, s);
+      if (h) addStroke(st, h, { wing: pt.shot === 'overhead' ? null : pt.wing, shot: pt.shot, ret: false }, pt.end === 'winner' ? 'winners' : pt.end === 'forcedError' ? 'forced' : 'unforced');
     }
     diff += pt.win === 'p' ? 1 : -1;
     st.momentum.push(diff);
@@ -523,9 +627,26 @@ export function sumStats(list: MatchStats[]): MatchStats {
       out.rally[r].played += st.rally[r].played;
       out.rally[r].won += st.rally[r].won;
     }
-    for (const s of SHOTS) {
-      out.strokes[s].winners += st.strokes[s].winners;
-      out.strokes[s].errors += st.strokes[s].errors;
+    for (const side of ['p', 'o'] as const) {
+      for (const c of COURT_SIDES) {
+        const a = out.court[side][c];
+        const b = st.court[side][c];
+        for (const k of Object.keys(a) as (keyof CourtStats)[]) a[k] += b[k];
+        for (const d of SERVE_DIRS) {
+          out.serveDir[side][c][d].played += st.serveDir[side][c][d].played;
+          out.serveDir[side][c][d].won += st.serveDir[side][c][d].won;
+        }
+      }
+      for (const w of [...WINGS, 'unknown'] as const) {
+        out.returns[side][w].winners += st.returns[side][w].winners;
+        out.returns[side][w].errors += st.returns[side][w].errors;
+      }
+      for (const row of Object.values(st.strokes[side])) {
+        const { winners, forced, unforced, ...key } = row;
+        if (winners) addStroke(out, side, key, 'winners', winners);
+        if (forced) addStroke(out, side, key, 'forced', forced);
+        if (unforced) addStroke(out, side, key, 'unforced', unforced);
+      }
     }
   }
   return out;
@@ -547,6 +668,10 @@ export const METRIC_META: Record<GoalMetric, { unit: 'pct' | 'perMatch'; op: 'gt
   netPointsWon: { unit: 'pct', op: 'gte', value: 60 },
   shortRallyWon: { unit: 'pct', op: 'gte', value: 50 },
   totalPointsWon: { unit: 'pct', op: 'gte', value: 50 },
+  deuceServeWon: { unit: 'pct', op: 'gte', value: 60 },
+  adServeWon: { unit: 'pct', op: 'gte', value: 60 },
+  deuceReturnWon: { unit: 'pct', op: 'gte', value: 40 },
+  adReturnWon: { unit: 'pct', op: 'gte', value: 40 },
 };
 
 const pctOf = (a: number, b: number) => (b > 0 ? (a / b) * 100 : null);
@@ -582,6 +707,14 @@ export function metricValue(metric: GoalMetric, st: MatchStats): number | null {
       return pctOf(st.rally.short.won, st.rally.short.played);
     case 'totalPointsWon':
       return pctOf(P.pointsWon, st.points);
+    case 'deuceServeWon':
+      return pctOf(st.court.p.deuce.serveWon, st.court.p.deuce.servePlayed);
+    case 'adServeWon':
+      return pctOf(st.court.p.ad.serveWon, st.court.p.ad.servePlayed);
+    case 'deuceReturnWon':
+      return pctOf(st.court.p.deuce.returnWon, st.court.p.deuce.returnPlayed);
+    case 'adReturnWon':
+      return pctOf(st.court.p.ad.returnWon, st.court.p.ad.returnPlayed);
     default:
       return null;
   }

@@ -362,18 +362,22 @@ async function run(engineName) {
     await page.getByTestId('double-fault').click();
     assert.deepEqual(await pts(), ['15', '15']);
     await page.getByTestId('serve-in').click();
-    await page.getByTestId('o-returnError').waitFor({ state: 'detached' }).catch(() => {});
-    await page.getByTestId('p-winner').click();
+        await page.getByTestId('p-winner-fh').click();
     assert.deepEqual(await pts(), ['30', '15']);
-    await page.getByTestId('shot-fh').click();
+    assert.match(await page.getByTestId('court-side').innerText(), /Ad court/); // 4th point of the game
+    assert.match(await page.getByTestId('last-point').innerText(), /Winner · Forehand$/);
+    await page.getByTestId('type-volley').click();
+    assert.match(await page.getByTestId('last-point').innerText(), /Winner · Forehand · Volley/);
+    assert.equal(await page.getByTestId('net-toggle').getAttribute('aria-pressed'), 'true', 'a volley means the player was at the net');
+    await page.getByTestId('wing-bh').click();
+    assert.match(await page.getByTestId('last-point').innerText(), /Backhand · Volley/);
     await page.getByTestId('rally-mid').click();
-    await page.getByTestId('net-toggle').click();
-    assert.match(await page.getByTestId('last-point').innerText(), /Winner · Forehand/);
-    assert.equal(await page.getByTestId('net-toggle').getAttribute('aria-pressed'), 'true');
+    await page.getByTestId('dir-t').click();
+    assert.equal(await page.getByTestId('dir-t').getAttribute('aria-pressed'), 'true');
     await page.getByTestId('undo-point').click();
     assert.deepEqual(await pts(), ['15', '15']);
     await page.getByTestId('serve-in').click();
-    await page.getByTestId('p-unforcedError').click(); // opponent's unforced error
+    await page.getByTestId('p-unforcedError-bh').click(); // opponent's unforced error
     assert.deepEqual(await pts(), ['30', '15']);
     await page.reload();
     await page.getByTestId('scoreboard').waitFor();
@@ -383,7 +387,7 @@ async function run(engineName) {
   await step('match tracker: the set is won 4-0, the report shows score and statistics', async () => {
     for (let i = 0; i < 40 && !(await page.getByTestId('final-score').count()); i++) {
       await page.getByTestId('serve-in').click();
-      await page.getByTestId('p-winner').click();
+      await page.getByTestId('p-winner-fh').click();
     }
     await page.getByTestId('final-score').waitFor();
     assert.equal(await page.getByTestId('score-line').innerText(), '4-0');
@@ -391,10 +395,19 @@ async function run(engineName) {
     const aces = await page.getByTestId('stats-table').getByRole('row').filter({ hasText: 'Aces' }).innerText();
     assert.match(aces, /^\s*1\b/);
     await page.getByTestId('momentum').waitFor();
+    await page.getByTestId('detailed-analysis').waitFor();
+    const deuce = await page.getByTestId('serve-won-deuce').innerText();
+    const ad = await page.getByTestId('serve-won-ad').innerText();
+    assert.match(deuce, /\d+%/);
+    assert.match(ad, /\d+%/);
+    assert.match(await page.getByTestId('ret-err-bh').innerText(), /^\d+$/);
+    await page.getByTestId('who-o').click();
+    assert.equal(await page.getByTestId('who-o').getAttribute('aria-checked'), 'true');
+    await page.getByTestId('who-p').click();
     await page.getByTestId('reopen-match').click(); // undo the match-winning point
     await page.getByTestId('scoreboard').waitFor();
     await page.getByTestId('serve-in').click();
-    await page.getByTestId('p-winner').click();
+    await page.getByTestId('p-winner-fh').click();
     await page.getByTestId('final-score').waitFor();
     await page.fill('#match-notes', 'Served well at 30-30.');
     await page.getByTestId('save-match-notes').click();
@@ -430,7 +443,7 @@ async function run(engineName) {
     await page.fill('#m-opponent', 'Retires');
     await page.getByTestId('match-submit').click();
     await page.getByTestId('serve-in').click();
-    await page.getByTestId('p-winner').click();
+    await page.getByTestId('p-winner-fh').click();
     await page.getByTestId('finish-early').click();
     await page.getByTestId('reason-retired').check();
     await page.getByTestId('finish-winner-p').check();

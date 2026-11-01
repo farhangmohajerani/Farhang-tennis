@@ -2,7 +2,7 @@ import type { AppState, Log, Match, MatchFormat, Plan, Session, Tournament } fro
 import { SEED_DRILLS } from './drills';
 import { LEVEL_THRESHOLDS } from './drills/factory';
 import { addDays, generateDates } from '../lib/schedule';
-import { applyPoint, encodePoint, newEngine, other, serverOf, type Point, type Side } from '../lib/match';
+import { applyPoint, bare, encodePoint, newEngine, other, serverOf, type Point, type Side } from '../lib/match';
 
 export const DEMO_IDS = {
   coach: 'person-coach-demo',
@@ -38,25 +38,26 @@ function pick<T>(r: () => number, items: [T, number][]): T {
 
 function simulatePoint(r: () => number, server: Side): Point {
   const p = server === 'p';
+  const dir = pick<Point['dir']>(r, [['wide', 40], ['body', 20], ['t', 40]]);
   const firstIn = r() < (p ? 0.58 : 0.62);
   const serve: 1 | 2 = firstIn ? 1 : 2;
-  if (!firstIn && r() < (p ? 0.1 : 0.07)) return { win: other(server), serve: 2, end: 'doubleFault', shot: 'serve', rally: 'short', net: false };
+  if (!firstIn && r() < (p ? 0.1 : 0.07)) return bare(other(server), 2, 'doubleFault', { shot: 'serve', rally: 'short' });
   const serverWins = r() < (p ? (serve === 1 ? 0.7 : 0.53) : serve === 1 ? 0.58 : 0.44);
   const win: Side = serverWins ? server : other(server);
   const rally = pick<Point['rally']>(r, [['short', 45], ['mid', 35], ['long', 20]]);
-  const stroke = pick<Point['shot']>(r, [['fh', 45], ['bh', 35], ['volley', 8], ['overhead', 3], ['drop', 4], ['lob', 5]]);
-  const ret = pick<Point['shot']>(r, [['fh', 50], ['bh', 50]]);
-  const net = win === 'p' ? r() < 0.16 : r() < 0.06;
+  const wing = pick<Point['wing']>(r, [['fh', 55], ['bh', 45]]);
+  const shot = pick<Point['shot']>(r, [['drive', 58], ['slice', 9], ['drop', 4], ['lob', 4], ['approach', 6], ['pass', 5], ['volley', 9], ['halfVolley', 1], ['overhead', 4]]);
+  const net = win === 'p' ? r() < 0.16 || shot === 'volley' || shot === 'overhead' : r() < 0.06;
   const x = r();
   if (serverWins) {
-    if (serve === 1 && x < 0.08) return { win, serve, end: 'ace', shot: 'serve', rally: 'short', net: false };
-    if (x < 0.18) return { win, serve, end: 'serviceWinner', shot: 'serve', rally: 'short', net: false };
-    if (x < 0.32) return { win, serve, end: 'returnError', shot: ret, rally: 'short', net: false };
+    if (serve === 1 && x < 0.08) return bare(win, serve, 'ace', { shot: 'serve', rally: 'short', dir });
+    if (x < 0.18) return bare(win, serve, 'serviceWinner', { shot: 'serve', rally: 'short', dir });
+    if (x < 0.32) return bare(win, serve, 'returnError', { wing, shot: r() < 0.2 ? 'slice' : 'drive', rally: 'short', dir });
   } else if (x < 0.07) {
-    return { win, serve, end: 'returnWinner', shot: ret, rally: 'short', net: false };
+    return bare(win, serve, 'returnWinner', { wing, shot: 'drive', rally: 'short', dir });
   }
   const end = pick<Point['end']>(r, [['winner', 38], ['forcedError', 25], ['unforcedError', 37]]);
-  return { win, serve, end, shot: stroke, rally, net };
+  return bare(win, serve, end, { wing: shot === 'overhead' ? null : wing, shot, rally, net, dir });
 }
 
 /** Simulate until the player wins (the demo story needs a win); same result every time. */

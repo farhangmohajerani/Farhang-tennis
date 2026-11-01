@@ -173,7 +173,7 @@ await step('admin charts a match; the linked parent follows the live score', asy
   await owner.getByTestId('scoreboard').waitFor();
   for (let i = 0; i < 2; i++) {
     await owner.getByTestId('serve-in').click();
-    await owner.getByTestId('p-winner').click();
+    await owner.getByTestId('p-winner-fh').click();
   }
   assert.equal(await owner.getByTestId('points-p').innerText(), '30');
   const fam = await person();
@@ -188,7 +188,7 @@ await step('admin charts a match; the linked parent follows the live score', asy
   assert.equal(await fam.getByTestId('points-p').innerText(), '30');
   assert.equal(await fam.getByTestId('serve-in').count(), 0, 'parents cannot chart');
   await owner.getByTestId('serve-in').click();
-  await owner.getByTestId('p-winner').click();
+  await owner.getByTestId('p-winner-fh').click();
   await fam.getByTestId('points-p').getByText('40').waitFor({ timeout: 15000 });
   assert.ok([...mock.docs.keys()].some((k) => k.startsWith('academy/data/matches/')));
 });

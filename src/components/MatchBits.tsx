@@ -1,5 +1,5 @@
 /** Shared pieces for matches and tournaments: labels, scoreboard, statistics, momentum chart. */
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { DictKey } from '../lib/i18n';
 import { formatDate } from '../lib/i18n';
 import { useStore } from '../lib/store';
@@ -19,14 +19,26 @@ import {
   type Side,
 } from '../lib/match';
 import type { GoalStatus } from '../lib/competition';
-import type { Match, PointEnd, Rally, Round, Shot, Surface } from '../types';
+import { COURT_SIDES, SERVE_DIRS, type CourtSide, type Match, type PointEnd, type Rally, type Round, type ServeDir, type ShotType, type Surface, type Wing } from '../types';
 import { Badge, cx } from './ui';
 
 type T = (key: DictKey, vars?: Record<string, string | number>) => string;
 
 export const roundLabel = (t: T, r: Round) => t(`round_${r}` as DictKey);
 export const surfaceLabel = (t: T, s: Surface) => t(`surface_${s}` as DictKey);
-export const shotLabel = (t: T, s: Shot) => t(`shot_${s}` as DictKey);
+export const shotLabel = (t: T, s: ShotType) => t(`shot_${s}` as DictKey);
+export const wingLabel = (t: T, w: Wing) => t(`wing_${w}` as DictKey);
+export const dirLabel = (t: T, d: ServeDir) => t(`dir_${d}` as DictKey);
+export const courtLabel = (t: T, c: CourtSide) => t(`court_${c}` as DictKey);
+
+/** "Forehand · Volley" — drive is the default groundstroke and is not repeated. */
+export function strokeText(t: T, wing: Wing | null, shot: ShotType | null): string {
+  const parts: string[] = [];
+  if (wing) parts.push(wingLabel(t, wing));
+  if (shot && shot !== 'drive' && shot !== 'serve') parts.push(shotLabel(t, shot));
+  if (!parts.length && shot === 'drive') parts.push(shotLabel(t, 'drive'));
+  return parts.join(' · ');
+}
 export const rallyLabel = (t: T, r: Rally) => t(`rally_${r}` as DictKey);
 export const endLabel = (t: T, e: PointEnd) => t(`end_${e}` as DictKey);
 
@@ -224,69 +236,206 @@ export function StatsTable({ st, nm }: { st: MatchStats; nm: Record<Side, string
   );
 }
 
-/** Player-only breakdowns: rally length, strokes, net. */
-export function PlayerBreakdown({ st, name }: { st: MatchStats; name: string }) {
-  const { t } = useStore();
-  const strokes = (['fh', 'bh', 'volley', 'overhead', 'drop', 'lob', 'serve'] as Shot[]).filter((s) => st.strokes[s].winners + st.strokes[s].errors > 0);
+type Pair2 = [number, number];
+const pctCell = ([a, b]: Pair2) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '—');
+
+function Frac({ v }: { v: Pair2 }) {
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      <div className="rounded-2xl border border-line bg-surface p-4" data-testid="rally-breakdown">
-        <h3 className="mb-1 font-semibold">{t('rallyTitle')}</h3>
-        <p className="mb-3 text-[12px] text-muted">{t('rallyHelp', { name: shortName(name) })}</p>
-        <ul className="flex flex-col gap-2.5">
-          {(['short', 'mid', 'long'] as Rally[]).map((r) => {
-            const x = st.rally[r];
-            const v = x.played ? x.won / x.played : null;
-            return (
-              <li key={r} className="num grid grid-cols-[72px_1fr_auto] items-center gap-2 text-sm">
-                <span className="font-semibold">{rallyLabel(t, r)}</span>
-                <span className="flex h-2.5 overflow-hidden rounded-full bg-sunken">
-                  <span className="h-full rounded-full bg-accent" style={{ width: `${v === null ? 0 : v * 100}%` }} />
-                </span>
-                <span className="font-mono text-[13px]">
-                  {v === null ? '—' : `${Math.round(v * 100)}%`} <span className="text-muted">{x.won}/{x.played}</span>
-                </span>
-              </li>
-            );
-          })}
-          <li className="num grid grid-cols-[72px_1fr_auto] items-center gap-2 border-t border-line pt-2.5 text-sm">
-            <span className="font-semibold">{t('st_netWon')}</span>
-            <span className="flex h-2.5 overflow-hidden rounded-full bg-sunken">
-              <span className="h-full rounded-full bg-accent" style={{ width: `${st.net.played ? (st.net.won / st.net.played) * 100 : 0}%` }} />
-            </span>
-            <span className="font-mono text-[13px]">
-              {st.net.played ? `${Math.round((st.net.won / st.net.played) * 100)}%` : '—'} <span className="text-muted">{st.net.won}/{st.net.played}</span>
-            </span>
-          </li>
-        </ul>
+    <span className="whitespace-nowrap">
+      <span className="font-mono text-[15px] font-semibold">{pctCell(v)}</span> <span className="text-[11px] text-muted">{v[0]}/{v[1]}</span>
+    </span>
+  );
+}
+
+function Panel({ title, help, children, testid }: { title: string; help?: string; children: ReactNode; testid?: string }) {
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-4" data-testid={testid}>
+      <h3 className="font-semibold">{title}</h3>
+      {help && <p className="mt-0.5 text-[12px] text-muted">{help}</p>}
+      <div className="mt-3">{children}</div>
+    </div>
+  );
+}
+
+/** Deuce / ad court, returns by wing, rally shots by kind, serve direction, rally length — for either player. */
+export function DetailedAnalysis({ st, nm }: { st: MatchStats; nm: Record<Side, string> }) {
+  const { t } = useStore();
+  const [who, setWho] = useState<Side>('p');
+  const C = st.court[who];
+  const R = st.returns[who];
+  const rows = Object.values(st.strokes[who])
+    .filter((r) => !r.ret)
+    .sort((a, b) => b.winners + b.forced + b.unforced - (a.winners + a.forced + a.unforced));
+  const dirs = st.serveDir[who];
+  const anyDir = COURT_SIDES.some((c) => SERVE_DIRS.some((d) => dirs[c][d].played > 0));
+  const name = shortName(nm[who]);
+  return (
+    <section data-testid="detailed-analysis">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-display text-2xl leading-tight">{t('detailTitle')}</h2>
+        <div role="radiogroup" aria-label={t('detailTitle')} className="flex gap-1 rounded-full border border-line bg-surface p-1">
+          {(['p', 'o'] as Side[]).map((s) => (
+            <button
+              key={s}
+              type="button"
+              role="radio"
+              aria-checked={who === s}
+              onClick={() => setWho(s)}
+              data-testid={`who-${s}`}
+              className={cx('rounded-full px-3 py-1 text-[13px] font-semibold', who === s ? 'bg-band text-band-ink' : 'text-muted')}
+            >
+              {shortName(nm[s])}
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="rounded-2xl border border-line bg-surface p-4" data-testid="stroke-breakdown">
-        <h3 className="mb-1 font-semibold">{t('strokesTitle')}</h3>
-        <p className="mb-3 text-[12px] text-muted">{t('strokesHelp', { name: shortName(name) })}</p>
-        {strokes.length === 0 ? (
-          <p className="text-sm text-muted">{t('noStrokes')}</p>
-        ) : (
+      <div className="grid gap-4 md:grid-cols-2">
+        <Panel title={t('courtTitle')} help={t('courtHelp', { name })} testid="court-sides">
           <table className="num w-full text-sm">
             <thead>
               <tr className="text-[12px] text-muted">
-                <th className="py-1 text-start font-semibold">{t('stroke')}</th>
-                <th className="py-1 text-end font-semibold text-good">{t('st_winners')}</th>
-                <th className="py-1 text-end font-semibold text-bad">{t('errorsShort')}</th>
+                <th className="py-1 text-start font-semibold" />
+                {COURT_SIDES.map((c) => (
+                  <th key={c} className="py-1 text-end font-semibold">{courtLabel(t, c)}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {strokes.map((s) => (
-                <tr key={s} className="border-t border-line">
-                  <td className="py-1.5 font-semibold">{shotLabel(t, s)}</td>
-                  <td className="py-1.5 text-end font-mono">{st.strokes[s].winners}</td>
-                  <td className="py-1.5 text-end font-mono">{st.strokes[s].errors}</td>
-                </tr>
-              ))}
+              <tr className="border-t border-line">
+                <th scope="row" className="py-2 text-start font-semibold">{t('servePtsWon')}</th>
+                {COURT_SIDES.map((c) => (
+                  <td key={c} className="py-2 text-end" data-testid={`serve-won-${c}`}><Frac v={[C[c].serveWon, C[c].servePlayed]} /></td>
+                ))}
+              </tr>
+              <tr className="border-t border-line">
+                <th scope="row" className="py-2 text-start font-normal text-muted">{t('st_firstIn')}</th>
+                {COURT_SIDES.map((c) => (
+                  <td key={c} className="py-2 text-end"><Frac v={[C[c].firstIn, C[c].servePlayed]} /></td>
+                ))}
+              </tr>
+              <tr className="border-t border-line">
+                <th scope="row" className="py-2 text-start font-normal text-muted">{t('st_aces')} / {t('st_dfShort')}</th>
+                {COURT_SIDES.map((c) => (
+                  <td key={c} className="py-2 text-end font-mono">{C[c].aces} / {C[c].doubleFaults}</td>
+                ))}
+              </tr>
+              <tr className="border-t-2 border-line">
+                <th scope="row" className="py-2 text-start font-semibold">{t('returnPtsWon')}</th>
+                {COURT_SIDES.map((c) => (
+                  <td key={c} className="py-2 text-end" data-testid={`return-won-${c}`}><Frac v={[C[c].returnWon, C[c].returnPlayed]} /></td>
+                ))}
+              </tr>
             </tbody>
           </table>
-        )}
+        </Panel>
+
+        <Panel title={t('returnsTitle')} help={t('returnsHelp', { name })} testid="returns-by-wing">
+          <table className="num w-full text-sm">
+            <thead>
+              <tr className="text-[12px] text-muted">
+                <th className="py-1 text-start font-semibold" />
+                <th className="py-1 text-end font-semibold text-good">{t('end_returnWinner')}</th>
+                <th className="py-1 text-end font-semibold text-bad">{t('end_returnError')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(['fh', 'bh', 'unknown'] as const)
+                .filter((w) => w !== 'unknown' || R.unknown.winners + R.unknown.errors > 0)
+                .map((w) => (
+                  <tr key={w} className="border-t border-line">
+                    <th scope="row" className="py-2 text-start font-semibold">{w === 'unknown' ? t('wingUnknown') : wingLabel(t, w)}</th>
+                    <td className="py-2 text-end font-mono" data-testid={`ret-win-${w}`}>{R[w].winners}</td>
+                    <td className="py-2 text-end font-mono" data-testid={`ret-err-${w}`}>{R[w].errors}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </Panel>
+
+        <Panel title={t('shotsTitle')} help={t('shotsHelp', { name })} testid="shots-by-kind">
+          {rows.length === 0 ? (
+            <p className="text-sm text-muted">{t('noStrokes')}</p>
+          ) : (
+            <table className="num w-full text-sm">
+              <thead>
+                <tr className="text-[12px] text-muted">
+                  <th className="py-1 text-start font-semibold">{t('stroke')}</th>
+                  <th className="py-1 text-end font-semibold text-good">{t('colWinners')}</th>
+                  <th className="py-1 text-end font-semibold text-warn">{t('colForced')}</th>
+                  <th className="py-1 text-end font-semibold text-bad">{t('colUnforced')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={`${r.wing}:${r.shot}`} className="border-t border-line" data-stroke={`${r.wing ?? '-'}:${r.shot ?? '-'}`}>
+                    <th scope="row" className="py-1.5 text-start font-semibold">{strokeText(t, r.wing, r.shot) || t('wingUnknown')}</th>
+                    <td className="py-1.5 text-end font-mono">{r.winners}</td>
+                    <td className="py-1.5 text-end font-mono">{r.forced}</td>
+                    <td className="py-1.5 text-end font-mono">{r.unforced}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {who === 'p' && st.net.played > 0 && (
+            <p className="mt-3 border-t border-line pt-2 text-sm">
+              <span className="font-semibold">{t('st_netWon')}:</span> <Frac v={[st.net.won, st.net.played]} />
+            </p>
+          )}
+        </Panel>
+
+        <Panel title={t('serveDirTitle')} help={t('serveDirHelp', { name })} testid="serve-direction">
+          {!anyDir ? (
+            <p className="text-sm text-muted">{t('serveDirEmpty')}</p>
+          ) : (
+            <table className="num w-full text-sm">
+              <thead>
+                <tr className="text-[12px] text-muted">
+                  <th className="py-1 text-start font-semibold" />
+                  {SERVE_DIRS.map((d) => (
+                    <th key={d} className="py-1 text-end font-semibold">{dirLabel(t, d)}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {COURT_SIDES.map((c) => (
+                  <tr key={c} className="border-t border-line">
+                    <th scope="row" className="py-2 text-start font-semibold">{courtLabel(t, c)}</th>
+                    {SERVE_DIRS.map((d) => (
+                      <td key={d} className="py-2 text-end">
+                        <span className="font-mono">{dirs[c][d].played}</span>
+                        {dirs[c][d].played > 0 && <span className="block text-[11px] text-muted">{t('wonPct', { pct: pctCell([dirs[c][d].won, dirs[c][d].played]) })}</span>}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Panel>
+
+        <Panel title={t('rallyTitle')} help={t('rallyHelp', { name })} testid="rally-breakdown">
+          <ul className="flex flex-col gap-2.5">
+            {(['short', 'mid', 'long'] as Rally[]).map((r) => {
+              const x = st.rally[r];
+              const won = who === 'p' ? x.won : x.played - x.won;
+              const v = x.played ? won / x.played : null;
+              return (
+                <li key={r} className="num grid grid-cols-[72px_1fr_auto] items-center gap-2 text-sm">
+                  <span className="font-semibold">{rallyLabel(t, r)}</span>
+                  <span className="flex h-2.5 overflow-hidden rounded-full bg-sunken">
+                    <span className="h-full rounded-full bg-accent" style={{ width: `${v === null ? 0 : v * 100}%` }} />
+                  </span>
+                  <span className="font-mono text-[13px]">
+                    {v === null ? '—' : `${Math.round(v * 100)}%`} <span className="text-muted">{won}/{x.played}</span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </Panel>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -327,7 +476,7 @@ export function MomentumChart({ st, name }: { st: MatchStats; name: string }) {
   );
 }
 
-/** "Ela: Winner · Forehand" — who ended the point and how. */
+/** "Ela: Winner · Forehand · Volley" / "Deniz: Ace · T" — who ended the point and how. */
 export function pointText(p: Point, server: Side, nm: Record<Side, string>, t: T): string {
   const by: Side | null =
     p.end === 'ace' || p.end === 'serviceWinner' || p.end === 'doubleFault'
@@ -340,6 +489,7 @@ export function pointText(p: Point, server: Side, nm: Record<Side, string>, t: T
             ? other(p.win)
             : null;
   if (!by) return t('pointFor', { name: shortName(nm[p.win]) });
-  const shot = p.shot && p.shot !== 'serve' ? ` · ${shotLabel(t, p.shot)}` : '';
-  return `${shortName(nm[by])}: ${endLabel(t, p.end)}${shot}`;
+  const serveEnd = p.end === 'ace' || p.end === 'serviceWinner';
+  const detail = serveEnd ? (p.dir ? dirLabel(t, p.dir) : '') : strokeText(t, p.wing, p.shot);
+  return `${shortName(nm[by])}: ${endLabel(t, p.end)}${detail ? ` · ${detail}` : ''}`;
 }

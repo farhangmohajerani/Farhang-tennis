@@ -21,12 +21,12 @@ import {
 } from '../src/lib/match';
 import { evaluateGoal, evaluateTournament, furthestRound, makeTournament } from '../src/lib/competition';
 import { createDemoState } from '../src/data/demo';
-import { MatchSchema, type Log, type Match, type MatchFormat } from '../src/types';
+import { MatchSchema, POINT_RE, type Log, type Match, type MatchFormat } from '../src/types';
 
 const BO3: MatchFormat = { sets: 3, games: 6, finalSet: 'full', noAd: false };
 const JUNIOR: MatchFormat = { sets: 3, games: 6, finalSet: 'mtb', noAd: false };
 
-const pt = (win: Side, extra: Partial<Point> = {}): string => encodePoint({ win, serve: 1, end: 'other', shot: null, rally: null, net: false, ...extra });
+const pt = (win: Side, extra: Partial<Point> = {}): string => encodePoint({ win, serve: 1, end: 'other', wing: null, shot: null, rally: null, net: false, dir: null, ...extra });
 /** n points for one side. */
 const pts = (win: Side, n: number) => Array.from({ length: n }, () => pt(win));
 /** A game won by `win` (4 straight points). */
@@ -53,17 +53,67 @@ function mkMatch(points: string[], format: MatchFormat = BO3, firstServer: Side 
 
 test('point codes round-trip', () => {
   const samples: Point[] = [
-    { win: 'p', serve: 1, end: 'ace', shot: 'serve', rally: 'short', net: false },
-    { win: 'o', serve: 2, end: 'doubleFault', shot: 'serve', rally: 'short', net: false },
-    { win: 'p', serve: 2, end: 'winner', shot: 'volley', rally: 'mid', net: true },
-    { win: 'o', serve: 1, end: 'unforcedError', shot: 'bh', rally: 'long', net: false },
-    { win: 'p', serve: 1, end: 'other', shot: null, rally: null, net: false },
+    { win: 'p', serve: 1, end: 'ace', wing: null, shot: 'serve', rally: 'short', net: false, dir: 't' },
+    { win: 'o', serve: 2, end: 'doubleFault', wing: null, shot: 'serve', rally: 'short', net: false, dir: null },
+    { win: 'p', serve: 2, end: 'winner', wing: 'bh', shot: 'volley', rally: 'mid', net: true, dir: 'wide' },
+    { win: 'o', serve: 1, end: 'unforcedError', wing: 'bh', shot: 'slice', rally: 'long', net: false, dir: 'body' },
+    { win: 'p', serve: 1, end: 'returnError', wing: 'fh', shot: 'drive', rally: 'short', net: false, dir: null },
+    { win: 'o', serve: 1, end: 'forcedError', wing: 'fh', shot: 'halfVolley', rally: null, net: true, dir: null },
+    { win: 'p', serve: 1, end: 'other', wing: null, shot: null, rally: null, net: false, dir: null },
   ];
   for (const s of samples) {
     const code = encodePoint(s);
-    assert.match(code, /^[po][12][ASDREWFUX][fbvodls-][sml-][n-]$/);
+    assert.match(code, POINT_RE);
+    assert.equal(code.length, 8);
     assert.deepEqual(decodePoint(code), s);
   }
+});
+
+test('matches charted with the older 6-character code are still read', () => {
+  assert.deepEqual(decodePoint('p1Wfm-'), { win: 'p', serve: 1, end: 'winner', wing: 'fh', shot: 'drive', rally: 'mid', net: false, dir: null });
+  assert.deepEqual(decodePoint('o2Uvln'), { win: 'o', serve: 2, end: 'unforcedError', wing: null, shot: 'volley', rally: 'long', net: true, dir: null });
+  assert.ok(MatchSchema.safeParse({ ...mkMatch([]), points: ['p1Wfm-', 'p1Wfvmnt'] }).success, 'old and new codes in one match');
+});
+
+test('court side follows the score: deuce court on even points, ad court on odd points', () => {
+  const sides = (m: Match) => replay(m).ctx.map((c) => c.court);
+  // 15-0, 30-0, 30-15, 30-30, 40-30, deuce, AD, deuce, AD, game
+  const g = [pt('p'), pt('p'), pt('o'), pt('o'), pt('p'), pt('o'), pt('p'), pt('o'), pt('p'), pt('p')];
+  assert.deepEqual(sides(mkMatch(g)), ['deuce', 'ad', 'deuce', 'ad', 'deuce', 'ad', 'deuce', 'ad', 'deuce', 'ad']);
+  // no-ad deciding point: the receiver chooses the side, so it is not assigned
+  const noAd = sides(mkMatch([pt('p'), pt('o'), pt('p'), pt('o'), pt('p'), pt('o'), pt('p')], { ...BO3, noAd: true }));
+  assert.deepEqual(noAd.slice(5), ['ad', null]);
+  // tie-break: first point deuce court, then ad, deuce…
+  const toTb = Array.from({ length: 6 }, () => [...game('p'), ...game('o')]).flat();
+  const tb = sides(mkMatch([...toTb, pt('p'), pt('o'), pt('p')])).slice(-3);
+  assert.deepEqual(tb, ['deuce', 'ad', 'deuce']);
+});
+
+test('serve and return by court side, serve direction, returns by forehand / backhand', () => {
+  // Player serves game 1: wins deuce-court points, loses one ad-court point on a forehand return winner.
+  const g1 = [
+    pt('p', { end: 'ace', shot: 'serve', dir: 't' }), // deuce
+    pt('o', { end: 'returnWinner', wing: 'fh', shot: 'drive', dir: 'wide' }), // ad
+    pt('p', { end: 'returnError', wing: 'bh', shot: 'slice', dir: 'wide' }), // deuce
+    pt('p', { serve: 2, end: 'winner', wing: 'fh', shot: 'drive', dir: 'body' }), // ad
+    pt('p', { end: 'unforcedError', wing: 'bh', shot: 'volley' }), // deuce: opponent's backhand volley error
+  ];
+  const st = matchStats(mkMatch(g1));
+  assert.deepEqual([st.court.p.deuce.servePlayed, st.court.p.deuce.serveWon], [3, 3]);
+  assert.deepEqual([st.court.p.ad.servePlayed, st.court.p.ad.serveWon], [2, 1]);
+  assert.equal(st.court.p.ad.firstIn, 1);
+  assert.equal(st.court.p.deuce.aces, 1);
+  assert.deepEqual([st.court.o.ad.returnPlayed, st.court.o.ad.returnWon], [2, 1]);
+  assert.equal(st.serveDir.p.deuce.t.played, 1);
+  assert.deepEqual(st.serveDir.p.ad.wide, { played: 1, won: 0 });
+  assert.deepEqual(st.serveDir.p.deuce.wide, { played: 1, won: 1 });
+  assert.equal(st.returns.o.fh.winners, 1);
+  assert.equal(st.returns.o.bh.errors, 1);
+  assert.equal(st.strokes.o['bh:volley'].unforced, 1, 'opponent missed a backhand volley');
+  assert.equal(st.strokes.p['fh:drive'].winners, 1);
+  assert.equal(Math.round(metricValue('adServeWon', st)!), 50);
+  assert.equal(metricValue('deuceServeWon', st), 100);
+  assert.equal(metricValue('adReturnWon', st), null, 'the player has not returned yet');
 });
 
 test('a game: 15-30-40-game, then the other player serves', () => {
@@ -182,16 +232,16 @@ test('statistics: serve, return, winners and errors go to the right player', () 
   const g1 = [
     pt('p', { end: 'ace', shot: 'serve' }), // 15-0 ace
     pt('o', { serve: 2, end: 'doubleFault', shot: 'serve' }), // 15-15 DF
-    pt('p', { end: 'winner', shot: 'fh', rally: 'mid' }), // 30-15 FH winner on 1st
-    pt('o', { serve: 2, end: 'unforcedError', shot: 'bh', rally: 'long' }), // 30-30 player BH UE on 2nd
-    pt('p', { end: 'returnError', shot: 'bh' }), // 40-30 opponent return error
-    pt('p', { serve: 2, end: 'forcedError', shot: 'fh', net: true }), // game, at net
+    pt('p', { end: 'winner', wing: 'fh', shot: 'drive', rally: 'mid' }), // 30-15 FH winner on 1st
+    pt('o', { serve: 2, end: 'unforcedError', wing: 'bh', shot: 'drive', rally: 'long' }), // 30-30 player BH UE on 2nd
+    pt('p', { end: 'returnError', wing: 'bh', shot: 'drive' }), // 40-30 opponent return error
+    pt('p', { serve: 2, end: 'forcedError', wing: 'fh', shot: 'drive', net: true }), // game, at net
   ];
   const g2 = [
-    pt('p', { end: 'returnWinner', shot: 'fh' }), // player return winner
+    pt('p', { end: 'returnWinner', wing: 'fh', shot: 'drive' }), // player return winner
     pt('o', { end: 'ace', shot: 'serve' }),
     pt('o', { end: 'serviceWinner', shot: 'serve' }),
-    pt('o', { end: 'winner', shot: 'fh' }),
+    pt('o', { end: 'winner', wing: 'fh', shot: 'drive' }),
     pt('o', { serve: 2, end: 'other' }),
   ];
   const st = matchStats(mkMatch([...g1, ...g2]));
@@ -219,10 +269,13 @@ test('statistics: serve, return, winners and errors go to the right player', () 
   assert.equal(st.p.returnWon, 1);
   assert.equal(st.net.played, 1);
   assert.equal(st.net.won, 1);
-  assert.equal(st.strokes.fh.winners, 2);
-  assert.equal(st.strokes.bh.errors, 1);
-  assert.equal(st.strokes.serve.winners, 1);
-  assert.equal(st.strokes.serve.errors, 1);
+  assert.equal(st.strokes.p['fh:drive'].winners, 1);
+  assert.equal(st.strokes.p['rfh:drive'].winners, 1, 'return winner kept apart from rally forehands');
+  assert.equal(st.strokes.p['bh:drive'].unforced, 1);
+  assert.equal(st.strokes.o['fh:drive'].forced, 1);
+  assert.equal(st.strokes.o['fh:drive'].winners, 1);
+  assert.equal(st.returns.p.fh.winners, 1);
+  assert.equal(st.returns.o.bh.errors, 1);
   assert.equal(st.rally.mid.won, 1);
   assert.equal(st.rally.long.played, 1);
   assert.equal(st.rally.short.played, 6, 'serve/return endings count as short rallies');
@@ -289,11 +342,14 @@ test('demo data: charted matches are finished wins with full statistics', () => 
 
 test('every generated label key exists in English and Persian', async () => {
   const { DICT_EN, DICT_FA } = await import('../src/lib/i18n');
-  const { ROUNDS, SURFACES, SHOTS, RALLY, POINT_END, GOAL_METRICS } = await import('../src/types');
+  const { ROUNDS, SURFACES, SHOT_TYPES, WINGS, SERVE_DIRS, COURT_SIDES, RALLY, POINT_END, GOAL_METRICS } = await import('../src/types');
   const keys = [
     ...ROUNDS.map((r) => `round_${r}`),
     ...SURFACES.map((s) => `surface_${s}`),
-    ...SHOTS.map((s) => `shot_${s}`),
+    ...SHOT_TYPES.map((s) => `shot_${s}`),
+    ...WINGS.flatMap((w) => [`wing_${w}`, `wingShort_${w}`]),
+    ...SERVE_DIRS.map((d) => `dir_${d}`),
+    ...COURT_SIDES.flatMap((c) => [`court_${c}`, `courtShort_${c}`]),
     ...RALLY.map((r) => `rally_${r}`),
     ...POINT_END.map((e) => `end_${e}`),
     ...GOAL_METRICS.map((m) => `metric_${m}`),

@@ -4,7 +4,7 @@ import { href, navigate } from '../lib/router';
 import { statsFromReplay, summary, type DisplaySet, type Side } from '../lib/match';
 import type { Match, MatchFormat } from '../types';
 import { Badge, Button, Card, ConfirmButton, cx, Field, inputCls, PageHeader, SectionTitle } from '../components/ui';
-import { MomentumChart, names, PlayerBreakdown, ResultBadge, scoreLine, StatsTable, useCanEdit } from '../components/MatchBits';
+import { DetailedAnalysis, MomentumChart, names, ResultBadge, scoreLine, StatsTable, useCanEdit } from '../components/MatchBits';
 import { EditMatchModal, MatchContext, PointList } from './MatchPage';
 
 type T = ReturnType<typeof useStore>['t'];
@@ -112,12 +112,7 @@ export function MatchReport({ m }: { m: Match }) {
           )}
         </div>
         <div className="flex min-w-0 flex-col gap-5">
-          {st && st.points > 0 && (
-            <>
-              <MomentumChart st={st} name={nm.p} />
-              <PlayerBreakdown st={st} name={nm.p} />
-            </>
-          )}
+          {st && st.points > 0 && <MomentumChart st={st} name={nm.p} />}
           <Card className="p-4">
             <Field label={t('matchNotes')} htmlFor="match-notes">
               {canEdit ? (
@@ -145,6 +140,12 @@ export function MatchReport({ m }: { m: Match }) {
           </Card>
         </div>
       </div>
+
+      {st && st.points > 0 && (
+        <div className="mt-8">
+          <DetailedAnalysis st={st} nm={nm} />
+        </div>
+      )}
 
       {sum.replay && sum.replay.ctx.length > 0 && (
         <details className="mt-6">

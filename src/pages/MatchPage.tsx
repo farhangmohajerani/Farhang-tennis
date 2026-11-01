@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useStore } from '../lib/store';
 import { href } from '../lib/router';
-import { formatDate } from '../lib/i18n';
-import { decodePoint, encodePoint, gameLabel, other, replay, serverOf, statsFromReplay, type Engine, type Point, type PointCtx, type Side } from '../lib/match';
-import type { Match, PointEnd, Rally, Shot } from '../types';
+import { formatDate, type DictKey } from '../lib/i18n';
+import { bare, courtOf, decodePoint, encodePoint, gameLabel, other, replay, serverOf, statsFromReplay, type Engine, type Point, type PointCtx, type Side } from '../lib/match';
+import type { Match, PointEnd, Rally, ServeDir, ShotType, Wing } from '../types';
 import { Badge, Button, Card, cx, Empty, Modal, PageHeader } from '../components/ui';
-import { names, pointText, rallyLabel, roundLabel, Scoreboard, shortName, shotLabel, StatsTable, surfaceLabel, useCanEdit } from '../components/MatchBits';
+import { courtLabel, dirLabel, names, pointText, rallyLabel, roundLabel, Scoreboard, shortName, shotLabel, StatsTable, surfaceLabel, useCanEdit, wingLabel } from '../components/MatchBits';
 import { MatchReport } from './MatchReport';
 import { MatchForm } from './MatchSetup';
 
@@ -53,7 +53,7 @@ function Big({ tone, testid, onClick, children }: { tone: 'primary' | 'good' | '
   );
 }
 
-/** Serve → outcome, two taps for most points. */
+/** Serve → outcome with forehand / backhand: two taps for most points. */
 function PointEntry({ e, nm, count, onPoint }: { e: Engine; nm: Record<Side, string>; count: number; onPoint: (p: Point) => void }) {
   const { t } = useStore();
   const [stage, setStage] = useState<'serve1' | 'serve2' | 'rally'>('serve1');
@@ -61,10 +61,11 @@ function PointEntry({ e, nm, count, onPoint }: { e: Engine; nm: Record<Side, str
   useEffect(() => setStage('serve1'), [count]);
   const server = serverOf(e);
   const receiver = other(server);
+  const court = courtOf(e);
   const tone = (side: Side) => (side === 'p' ? 'good' : 'bad');
-  const point = (p: Omit<Point, 'net'> & { net?: boolean }) => {
+  const point = (p: Point) => {
     setStage('serve1');
-    onPoint({ net: false, ...p });
+    onPoint(p);
   };
   const n: 1 | 2 = stage === 'serve2' ? 2 : 1;
 
@@ -76,21 +77,35 @@ function PointEntry({ e, nm, count, onPoint }: { e: Engine; nm: Record<Side, str
       { end: 'forcedError', label: t('errBy', { name: shortName(nm[loser]), err: t('end_forcedError') }) },
       { end: 'unforcedError', label: t('errBy', { name: shortName(nm[loser]), err: t('end_unforcedError') }) },
       ...(loser === receiver ? [{ end: 'returnError' as const, label: t('errBy', { name: shortName(nm[loser]), err: t('end_returnError') }) }] : []),
-      { end: 'other', label: t('otherPoint') },
     ];
     return (
       <div className="flex min-w-0 flex-col gap-2" data-column={side}>
         <div className={cx('rounded-full py-1 text-center text-[13px] font-bold', side === 'p' ? 'bg-good-soft text-good' : 'bg-bad-soft text-bad')}>{t('pointTo', { name: shortName(nm[side]) })}</div>
-        {items.map((it) => (
-          <Big
-            key={it.end}
-            tone={tone(side)}
-            testid={`${side}-${it.end}`}
-            onClick={() => point({ win: side, serve: serveNo, end: it.end, shot: null, rally: it.end === 'returnWinner' || it.end === 'returnError' ? 'short' : null })}
-          >
-            {it.label}
-          </Big>
-        ))}
+        {items.map((it) => {
+          const ret = it.end === 'returnWinner' || it.end === 'returnError';
+          return (
+            <div key={it.end} className={cx('rounded-2xl border p-1.5', side === 'p' ? 'border-good/30 bg-good-soft' : 'border-bad/30 bg-bad-soft')} data-row={`${side}-${it.end}`}>
+              <div className={cx('ui-bidi px-1.5 pb-1 text-[12.5px] font-bold leading-tight', side === 'p' ? 'text-good' : 'text-bad')}>{it.label}</div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(['fh', 'bh'] as Wing[]).map((w) => (
+                  <button
+                    key={w}
+                    type="button"
+                    data-testid={`${side}-${it.end}-${w}`}
+                    onClick={() => point(bare(side, serveNo, it.end, { wing: w, shot: 'drive', rally: ret ? 'short' : null }))}
+                    className={cx('min-h-[46px] rounded-xl bg-surface px-1.5 text-[14px] font-semibold leading-tight transition active:scale-[0.97]', side === 'p' ? 'text-good' : 'text-bad')}
+                  >
+                    <span className="sm:hidden">{t(`wingShort_${w}` as DictKey)}</span>
+                    <span className="hidden sm:inline">{wingLabel(t, w)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        <Big tone={tone(side)} testid={`${side}-other`} onClick={() => point(bare(side, serveNo, 'other'))}>
+          {t('otherPoint')}
+        </Big>
       </div>
     );
   };
@@ -101,6 +116,12 @@ function PointEntry({ e, nm, count, onPoint }: { e: Engine; nm: Record<Side, str
         <p className="ui-bidi text-sm" data-testid="serve-status">
           <span className="eyebrow me-1">{t('serving')}</span>
           <strong>{shortName(nm[server])}</strong> · {stage === 'rally' ? (serveNo === 1 ? t('firstServe') : t('secondServe')) : n === 1 ? t('firstServe') : t('secondServe')}
+          {court && (
+            <>
+              {' · '}
+              <span className="font-semibold text-accent" data-testid="court-side">{courtLabel(t, court)}</span>
+            </>
+          )}
         </p>
         {stage !== 'serve1' && (
           <Button size="sm" variant="ghost" onClick={() => setStage(stage === 'rally' ? (serveNo === 2 ? 'serve2' : 'serve1') : 'serve1')} data-testid="entry-back">
@@ -125,14 +146,14 @@ function PointEntry({ e, nm, count, onPoint }: { e: Engine; nm: Record<Side, str
               {t('fault')}
             </Big>
           ) : (
-            <Big tone={tone(receiver)} testid="double-fault" onClick={() => point({ win: receiver, serve: 2, end: 'doubleFault', shot: 'serve', rally: 'short' })}>
+            <Big tone={tone(receiver)} testid="double-fault" onClick={() => point(bare(receiver, 2, 'doubleFault', { shot: 'serve', rally: 'short' }))}>
               {t('end_doubleFault')}
             </Big>
           )}
-          <Big tone={tone(server)} testid="ace" onClick={() => point({ win: server, serve: n, end: 'ace', shot: 'serve', rally: 'short' })}>
+          <Big tone={tone(server)} testid="ace" onClick={() => point(bare(server, n, 'ace', { shot: 'serve', rally: 'short' }))}>
             {t('end_ace')}
           </Big>
-          <Big tone={tone(server)} testid="service-winner" onClick={() => point({ win: server, serve: n, end: 'serviceWinner', shot: 'serve', rally: 'short' })}>
+          <Big tone={tone(server)} testid="service-winner" onClick={() => point(bare(server, n, 'serviceWinner', { shot: 'serve', rally: 'short' }))}>
             {t('end_serviceWinner')}
           </Big>
         </div>
@@ -146,12 +167,14 @@ function PointEntry({ e, nm, count, onPoint }: { e: Engine; nm: Record<Side, str
   );
 }
 
-/** Optional detail for the point just recorded: stroke, rally length, net. */
+const RALLY_SHOTS: ShotType[] = ['drive', 'slice', 'drop', 'lob', 'approach', 'pass', 'volley', 'halfVolley', 'overhead'];
+
+/** Detail for the point just recorded: wing, kind of shot, rally length, net, serve direction. */
 function LastPointDetail({ p, c, nm, onChange }: { p: Point; c: PointCtx; nm: Record<Side, string>; onChange: (patch: Partial<Point>) => void }) {
   const { t } = useStore();
   const serveEnd = p.end === 'ace' || p.end === 'serviceWinner' || p.end === 'doubleFault';
   const returnEnd = p.end === 'returnWinner' || p.end === 'returnError';
-  const shots: Shot[] = returnEnd ? ['fh', 'bh'] : ['fh', 'bh', 'volley', 'overhead', 'drop', 'lob'];
+  const rallyEnd = p.end === 'winner' || p.end === 'forcedError' || p.end === 'unforcedError';
   const chip = (sel: boolean, label: string, testid: string, onClick: () => void) => (
     <button
       key={testid}
@@ -164,34 +187,43 @@ function LastPointDetail({ p, c, nm, onChange }: { p: Point; c: PointCtx; nm: Re
       {label}
     </button>
   );
+  const row = (label: string, children: ReactNode) => (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="w-full shrink-0 text-[12px] font-semibold text-muted sm:w-28">{label}</span>
+      {children}
+    </div>
+  );
   return (
     <Card className="p-4" as="div">
-      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-        <span className="eyebrow">{t('lastPoint')}</span>
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <span className="eyebrow">
+          {t('lastPoint')}
+          {c.court && <> · {courtLabel(t, c.court)}</>}
+        </span>
         <span className="ui-bidi text-sm font-semibold" data-testid="last-point">{pointText(p, c.server, nm, t)}</span>
       </div>
-      {serveEnd || p.end === 'other' ? (
-        <p className="text-[13px] text-muted">{t('noDetailNeeded')}</p>
-      ) : (
-        <div className="flex flex-col gap-2.5">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="w-24 shrink-0 text-[12px] font-semibold text-muted">{t('stroke')}</span>
-            {shots.map((s) => chip(p.shot === s, shotLabel(t, s), `shot-${s}`, () => onChange({ shot: p.shot === s ? null : s })))}
-          </div>
-          {!returnEnd && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="w-24 shrink-0 text-[12px] font-semibold text-muted">{t('rallyLen')}</span>
-              {(['short', 'mid', 'long'] as Rally[]).map((r) => chip(p.rally === r, rallyLabel(t, r), `rally-${r}`, () => onChange({ rally: p.rally === r ? null : r })))}
-            </div>
+      <div className="flex flex-col gap-3">
+        {(rallyEnd || returnEnd) &&
+          row(
+            t('wingLabel'),
+            (['fh', 'bh'] as Wing[]).map((w) => chip(p.wing === w, wingLabel(t, w), `wing-${w}`, () => onChange({ wing: p.wing === w ? null : w, shot: p.shot === 'overhead' ? 'drive' : p.shot }))),
           )}
-          {!returnEnd && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="w-24 shrink-0 text-[12px] font-semibold text-muted">{t('netLabel')}</span>
-              {chip(p.net, t('atNet', { name: shortName(nm.p) }), 'net-toggle', () => onChange({ net: !p.net }))}
-            </div>
+        {(rallyEnd || returnEnd) &&
+          row(
+            t('stroke'),
+            (returnEnd ? (['drive', 'slice'] as ShotType[]) : RALLY_SHOTS).map((s) =>
+              chip(p.shot === s, shotLabel(t, s), `type-${s}`, () => onChange({ shot: p.shot === s ? null : s, ...(s === 'overhead' ? { wing: null } : {}), ...(s === 'volley' || s === 'halfVolley' || s === 'overhead' ? { net: true } : {}) })),
+            ),
           )}
-        </div>
-      )}
+        {rallyEnd && row(t('rallyLen'), (['short', 'mid', 'long'] as Rally[]).map((r) => chip(p.rally === r, rallyLabel(t, r), `rally-${r}`, () => onChange({ rally: p.rally === r ? null : r }))))}
+        {rallyEnd && row(t('netLabel'), chip(p.net, t('atNet', { name: shortName(nm.p) }), 'net-toggle', () => onChange({ net: !p.net })))}
+        {p.end !== 'doubleFault' &&
+          row(
+            t('serveDirLabel', { name: shortName(nm[c.server]) }),
+            (['wide', 'body', 't'] as ServeDir[]).map((d) => chip(p.dir === d, dirLabel(t, d), `dir-${d}`, () => onChange({ dir: p.dir === d ? null : d }))),
+          )}
+        {serveEnd && p.end === 'doubleFault' && <p className="text-[13px] text-muted">{t('noDetailNeeded')}</p>}
+      </div>
     </Card>
   );
 }
@@ -218,6 +250,7 @@ export function PointList({ ctx, nm, noAd, limit }: { ctx: PointCtx[]; nm: Recor
         <li key={c.index} className={cx('flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2', c.setWinner && 'bg-sunken')}>
           <span className="num w-8 shrink-0 font-mono text-[12px] text-muted">{c.index + 1}</span>
           <span className="num w-40 shrink-0 font-mono text-[12px] text-muted" dir="ltr">{ctxScore(c, noAd)}</span>
+          <span className="w-14 shrink-0 text-[11px] font-semibold text-muted">{c.court ? t(`courtShort_${c.court}` as DictKey) : '—'}</span>
           <span className={cx('h-2 w-2 shrink-0 rounded-full', c.point.win === 'p' ? 'bg-good' : 'bg-bad')} aria-hidden="true" />
           <span className="ui-bidi min-w-0 flex-1">
             {pointText(c.point, c.server, nm, t)}
