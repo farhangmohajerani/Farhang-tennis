@@ -15,6 +15,8 @@ export interface StorageAdapter {
   canWrite?: boolean;
   /** Live updates from other people (shared mode). */
   subscribe?(apply: (fn: (s: AppState) => AppState) => void): void;
+  /** Look for other people's changes more often while a live score is being followed. */
+  setFastSync?(on: boolean): void;
   /** Human-readable description shown in the UI so demo storage is never mistaken for production. */
   readonly label: string;
   load(): Promise<AppState | null>;

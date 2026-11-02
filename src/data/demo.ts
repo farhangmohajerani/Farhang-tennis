@@ -304,7 +304,7 @@ export function createDemoState(today: string): AppState {
   }
 
   const junior: MatchFormat = { sets: 3, games: 6, finalSet: 'mtb', noAd: false };
-  const baseMatch = { playerId: DEMO_IDS.player, opponentHand: 'right' as const, indoor: false, endReason: 'completed' as const, winner: null, sets: [], points: [] as string[], oppNet: [] as number[], notes: '' };
+  const baseMatch = { playerId: DEMO_IDS.player, opponentHand: 'right' as const, indoor: false, endReason: 'completed' as const, winner: null, sets: [], points: [] as string[], oppNet: [] as number[], notes: '', ai: null };
   const matches: Match[] = [
     {
       ...baseMatch,

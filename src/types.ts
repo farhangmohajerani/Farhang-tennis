@@ -287,10 +287,19 @@ export const MatchSchema = z.object({
   /** Winner when finished early or entered as a score (charted matches compute it). */
   winner: z.enum(['p', 'o']).nullable().default(null),
   notes: z.string().default(''),
+  /**
+   * The latest AI Coach analysis (two paragraphs), made by a coach with their own API key and kept
+   * with the match so parents can read it. Fields are kept loose so later providers still parse.
+   */
+  ai: z
+    .object({ text: z.string().max(6000), provider: z.string(), model: z.string(), lang: z.string(), points: z.number().int().min(0), createdAt: z.string() })
+    .nullable()
+    .default(null),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 export type Match = z.infer<typeof MatchSchema>;
+export type MatchInsight = NonNullable<Match['ai']>;
 
 export const ERROR_TYPES = ['net', 'long', 'wide', 'wrongChoice', 'late', 'other'] as const;
 export type ErrorType = (typeof ERROR_TYPES)[number];

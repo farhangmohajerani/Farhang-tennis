@@ -29,6 +29,7 @@ export class SupabaseDocDb implements DbLike {
   private loaded: Promise<void> | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private polling = false;
+  private pollMs = POLL_MS;
 
   constructor(private cfg: SupabaseConfig, private auth: SupabaseAuth) {}
 
@@ -77,14 +78,29 @@ export class SupabaseDocDb implements DbLike {
       })().catch((e) => {
         console.warn('initial load failed', e);
       });
-      this.timer = setInterval(() => {
-        if (document.visibilityState === 'visible') void this.poll();
-      }, POLL_MS);
+      this.restartTimer();
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') void this.poll();
       });
     }
     return this.loaded;
+  }
+
+  private restartTimer() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = setInterval(() => {
+      if (document.visibilityState === 'visible') void this.poll();
+    }, this.pollMs);
+  }
+
+  /** Check for changes more often (a parent following a live score), or back to normal. */
+  setPollMs(ms: number) {
+    if (ms === this.pollMs) return;
+    this.pollMs = ms;
+    if (this.loaded) {
+      this.restartTimer();
+      void this.poll();
+    }
   }
 
   /** Cheap check: paths + versions; then fetch only what changed. */

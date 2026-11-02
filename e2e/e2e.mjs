@@ -491,6 +491,50 @@ async function run(engineName) {
     assert.equal(await total(), whole);
   });
 
+  await step('AI Coach: the coach’s own key, OpenAI and Gemini answers kept with the match, clear errors, parents read it', async () => {
+    const sent = [];
+    const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, OPTIONS' };
+    const answer = (status, json) => async (route) => {
+      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+      sent.push({ url: route.request().url(), headers: route.request().headers(), body: route.request().postData() ?? '' });
+      await route.fulfill({ status, headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify(json) });
+    };
+    await page.route('https://api.openai.com/**', answer(200, { choices: [{ message: { content: 'The serve decided it: 66% of first serves won.\n\nBackhand errors in long rallies; train crosscourt depth.' } }] }));
+    await page.route('https://generativelanguage.googleapis.com/**', answer(200, { candidates: [{ content: { parts: [{ text: 'Gemini tactics paragraph.\n\nGemini work paragraph.' }] } }] }));
+    await go('match-match-demo-1');
+    await page.getByTestId('ai-coach').waitFor();
+    await page.getByTestId('ai-ask').click(); // no key yet: settings open
+    await page.getByTestId('ai-settings-modal').waitFor();
+    await page.fill('#ai-key', 'sk-test-123');
+    await page.getByTestId('ai-save').click();
+    await page.getByTestId('ai-p2').waitFor();
+    assert.match(await page.getByTestId('ai-p1').innerText(), /66% of first serves won/);
+    assert.equal(sent[0].headers.authorization, 'Bearer sk-test-123');
+    assert.ok(sent[0].body.includes('KEY STATISTICS'));
+    assert.ok(!/Ela|Demir|Mina|Aksoy/.test(sent[0].body), 'no names are sent');
+    await page.reload();
+    await page.getByTestId('ai-p2').waitFor(); // kept with the match
+    await page.getByTestId('ai-settings').click();
+    await page.getByTestId('ai-provider-gemini').click();
+    await page.fill('#ai-key', 'AIza-test');
+    await page.getByTestId('ai-save').click();
+    await page.getByText('Gemini work paragraph.').waitFor();
+    assert.equal(sent[1].headers['x-goog-api-key'], 'AIza-test');
+    await page.unroute('https://generativelanguage.googleapis.com/**');
+    await page.route('https://generativelanguage.googleapis.com/**', answer(400, { error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } }));
+    await page.getByTestId('ai-ask').click();
+    assert.match(await page.getByTestId('ai-error').innerText(), /did not accept the API key/);
+    assert.match(await page.getByTestId('ai-p1').innerText(), /Gemini tactics/, 'the saved analysis stays');
+    await setRole('parent');
+    await go('match-match-demo-1');
+    await page.getByTestId('ai-p1').waitFor();
+    assert.equal(await page.getByTestId('ai-ask').count(), 0, 'parents read, coaches ask');
+    assert.equal(await page.getByTestId('ai-settings').count(), 0);
+    await setRole('coach');
+    await page.unroute('https://api.openai.com/**');
+    await page.unroute('https://generativelanguage.googleapis.com/**');
+  });
+
   await step('final score only: tie-break notation and the tournament result goal', async () => {
     await go('newmatch-tour-demo');
     assert.equal(await page.getByTestId('mt-official').getAttribute('aria-checked'), 'true');

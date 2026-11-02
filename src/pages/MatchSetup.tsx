@@ -380,6 +380,7 @@ export function MatchSetup({ tournamentId }: { tournamentId: string }) {
     endReason: 'completed',
     winner: null,
     notes: '',
+    ai: null,
     createdAt: now,
     updatedAt: now,
   };

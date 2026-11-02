@@ -29,6 +29,7 @@ export type Action =
   | { type: 'upsertTournament'; tournament: Tournament }
   | { type: 'removeTournament'; id: string }
   | { type: 'saveMatch'; match: Match }
+  | { type: 'setMatchAi'; id: string; ai: Match['ai'] }
   | { type: 'deleteMatch'; id: string };
 
 const now = () => new Date().toISOString();
@@ -145,6 +146,9 @@ export function reducer(state: AppState, action: Action): AppState {
       const exists = state.matches.some((x) => x.id === m.id);
       return { ...state, matches: exists ? state.matches.map((x) => (x.id === m.id ? m : x)) : [...state.matches, m] };
     }
+    case 'setMatchAi':
+      // Merged into the current match (points may have been added while the analysis ran).
+      return { ...state, matches: state.matches.map((m) => (m.id === action.id ? { ...m, ai: action.ai, updatedAt: now() } : m)) };
     case 'deleteMatch':
       return { ...state, matches: state.matches.filter((m) => m.id !== action.id) };
     default:

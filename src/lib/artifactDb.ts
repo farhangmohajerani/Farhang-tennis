@@ -288,6 +288,11 @@ export class ArtifactDbAdapter implements StorageAdapter {
     this.apply = apply;
   }
 
+  /** Supabase polls; a followed live score is checked every 2 s instead of 5 s. */
+  setFastSync(on: boolean) {
+    (this.db as { setPollMs?: (ms: number) => void }).setPollMs?.(on ? 2000 : 5000);
+  }
+
   private applyColl(k: CollKey) {
     this.apply?.((s) => this.mergeColl(s, k));
   }

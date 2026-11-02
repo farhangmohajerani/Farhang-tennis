@@ -24,6 +24,7 @@ import { RALLY, SERVE_DIRS, WINGS, type Match, type PointEnd } from '../types';
 import { Badge, Button, Card, cx, Empty, Modal, PageHeader } from '../components/ui';
 import { courtLabel, dirLabel, names, pointText, rallyLabel, roundLabel, Scoreboard, shortName, shotLabel, StatsTable, surfaceLabel, useCanEdit, wingLabel } from '../components/MatchBits';
 import { MatchReport } from './MatchReport';
+import { AiCoach } from '../components/AiCoach';
 import { MatchForm } from './MatchSetup';
 
 export function MatchPage({ id }: { id: string }) {
@@ -454,8 +455,14 @@ export function EditMatchModal({ m, open, onClose }: { m: Match; open: boolean; 
 }
 
 function MatchLive({ m }: { m: Match }) {
-  const { state, dispatch, t, toast } = useStore();
+  const { state, dispatch, t, toast, adapter } = useStore();
   const canEdit = useCanEdit();
+  // Someone following the score (a parent) gets new points within about 2 seconds.
+  useEffect(() => {
+    if (canEdit) return;
+    adapter.setFastSync?.(true);
+    return () => adapter.setFastSync?.(false);
+  }, [canEdit, adapter]);
   const player = state.players.find((p) => p.id === m.playerId);
   const nm = names(m, player?.name ?? t('player'), t);
   const r = useMemo(() => replay(m), [m]);
@@ -527,6 +534,7 @@ function MatchLive({ m }: { m: Match }) {
               <PointList ctx={r.ctx} nm={nm} noAd={m.format.noAd} limit={8} />
             </section>
           )}
+          {st.points > 0 && <AiCoach m={m} live />}
           {st.points > 0 && (
             <details className="rounded-2xl border border-line bg-surface p-3">
               <summary className="cursor-pointer font-semibold">{t('liveStats')}</summary>

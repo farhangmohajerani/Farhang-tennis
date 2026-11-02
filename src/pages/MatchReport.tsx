@@ -6,6 +6,7 @@ import type { Match, MatchFormat } from '../types';
 import { Badge, Button, Card, ConfirmButton, cx, Field, inputCls, PageHeader, SectionTitle } from '../components/ui';
 import { DetailedAnalysis, MomentumChart, names, ResultBadge, scoreLine, StatsTable, useCanEdit } from '../components/MatchBits';
 import { EditMatchModal, MatchContext, PointList } from './MatchPage';
+import { AiCoach } from '../components/AiCoach';
 
 type T = ReturnType<typeof useStore>['t'];
 
@@ -137,6 +138,7 @@ export function MatchReport({ m }: { m: Match }) {
           )}
         </div>
         <div className="flex min-w-0 flex-col gap-5">
+          {charted && <AiCoach m={m} />}
           {full && full.points > 0 && <MomentumChart st={full} name={nm.p} />}
           <Card className="p-4">
             <Field label={t('matchNotes')} htmlFor="match-notes">
