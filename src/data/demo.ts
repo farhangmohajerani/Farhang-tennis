@@ -2,7 +2,7 @@ import type { AppState, Log, Match, MatchFormat, Plan, Session, Tournament } fro
 import { SEED_DRILLS } from './drills';
 import { LEVEL_THRESHOLDS } from './drills/factory';
 import { addDays, generateDates } from '../lib/schedule';
-import { applyPoint, bare, encodePoint, newEngine, other, serverOf, type Point, type Side } from '../lib/match';
+import { applyPoint, bare, encodePoint, hitterOf, NET_SHOTS, newEngine, other, serverOf, type Point, type Side } from '../lib/match';
 
 export const DEMO_IDS = {
   coach: 'person-coach-demo',
@@ -61,19 +61,24 @@ function simulatePoint(r: () => number, server: Side): Point {
 }
 
 /** Simulate until the player wins (the demo story needs a win); same result every time. */
-function demoPoints(format: MatchFormat, firstServer: Side, seed: number): string[] {
+function demoPoints(format: MatchFormat, firstServer: Side, seed: number): { points: string[]; oppNet: number[] } {
   for (let attempt = 0; attempt < 50; attempt++) {
     const r = rng(seed + attempt * 7919);
     const e = newEngine(format, firstServer);
-    const pts: string[] = [];
-    while (!e.winner && pts.length < 400) {
-      const pt = simulatePoint(r, serverOf(e));
+    const points: string[] = [];
+    const oppNet: number[] = [];
+    while (!e.winner && points.length < 400) {
+      const server = serverOf(e);
+      const pt = simulatePoint(r, server);
+      // The opponent was at the net when her last shot was a volley or overhead, or the player passed her.
+      const hitter = hitterOf(pt, server);
+      if ((hitter === 'o' && pt.shot && NET_SHOTS.includes(pt.shot)) || (hitter === 'p' && pt.shot === 'pass')) oppNet.push(points.length);
       applyPoint(e, pt.win);
-      pts.push(encodePoint(pt));
+      points.push(encodePoint(pt));
     }
-    if (e.winner === 'p') return pts;
+    if (e.winner === 'p') return { points, oppNet };
   }
-  return [];
+  return { points: [], oppNet: [] };
 }
 
 /** Demo plan: baseline → focused block → match evaluation → baseline comparison. */
@@ -299,7 +304,7 @@ export function createDemoState(today: string): AppState {
   }
 
   const junior: MatchFormat = { sets: 3, games: 6, finalSet: 'mtb', noAd: false };
-  const baseMatch = { playerId: DEMO_IDS.player, opponentHand: 'right' as const, indoor: false, endReason: 'completed' as const, winner: null, sets: [], points: [] as string[], notes: '' };
+  const baseMatch = { playerId: DEMO_IDS.player, opponentHand: 'right' as const, indoor: false, endReason: 'completed' as const, winner: null, sets: [], points: [] as string[], oppNet: [] as number[], notes: '' };
   const matches: Match[] = [
     {
       ...baseMatch,
@@ -314,7 +319,7 @@ export function createDemoState(today: string): AppState {
       format: junior,
       firstServer: 'p',
       mode: 'live',
-      points: demoPoints(junior, 'p', 11),
+      ...demoPoints(junior, 'p', 11),
       status: 'done',
       notes: 'Served well on big points. Backhand errors in long rallies.',
       createdAt: `${pastTournament.start}T10:00:00.000Z`,
@@ -357,7 +362,7 @@ export function createDemoState(today: string): AppState {
       format: junior,
       firstServer: 'o',
       mode: 'live',
-      points: demoPoints(junior, 'o', 29),
+      ...demoPoints(junior, 'o', 29),
       status: 'done',
       notes: 'Good depth in the first set. Approached two short balls and won both.',
       createdAt: `${addDays(today, -5)}T16:00:00.000Z`,

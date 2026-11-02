@@ -1,11 +1,28 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useStore } from '../lib/store';
 import { href } from '../lib/router';
 import { formatDate, type DictKey } from '../lib/i18n';
-import { bare, courtOf, decodePoint, encodePoint, gameLabel, other, replay, serverOf, statsFromReplay, type Engine, type Point, type PointCtx, type Side } from '../lib/match';
-import type { Match, PointEnd, Rally, ServeDir, ShotType, Wing } from '../types';
+import {
+  composePoint,
+  courtOf,
+  decodePoint,
+  draftOf,
+  EMPTY_DRAFT,
+  encodePoint,
+  gameLabel,
+  other,
+  replay,
+  serverOf,
+  statsFromReplay,
+  type Engine,
+  type Point,
+  type PointCtx,
+  type PointDraft,
+  type Side,
+} from '../lib/match';
+import { RALLY, SERVE_DIRS, WINGS, type Match, type PointEnd, type ShotType } from '../types';
 import { Badge, Button, Card, cx, Empty, Modal, PageHeader } from '../components/ui';
-import { courtLabel, dirLabel, names, pointText, rallyLabel, roundLabel, Scoreboard, shortName, shotLabel, StatsTable, surfaceLabel, useCanEdit, wingLabel } from '../components/MatchBits';
+import { courtLabel, dirLabel, names, pointText, rallyLabel, roundLabel, Scoreboard, shortName, shotLabel, StatsTable, strokeText, surfaceLabel, useCanEdit, wingLabel } from '../components/MatchBits';
 import { MatchReport } from './MatchReport';
 import { MatchForm } from './MatchSetup';
 
@@ -34,18 +51,18 @@ export function MatchContext({ m }: { m: Match }) {
   return <>{parts.join(' · ')}</>;
 }
 
-function Big({ tone, testid, onClick, children }: { tone: 'primary' | 'good' | 'bad' | 'neutral'; testid: string; onClick: () => void; children: ReactNode }) {
+const COMPOSER_SHOTS: ShotType[] = ['drive', 'slice', 'volley', 'halfVolley', 'drop', 'lob', 'approach', 'pass', 'overhead'];
+
+function Chip({ on, testid, onClick, children }: { on: boolean; testid: string; onClick: () => void; children: ReactNode }) {
   return (
     <button
       type="button"
+      aria-pressed={on}
       data-testid={testid}
       onClick={onClick}
       className={cx(
-        'min-h-[54px] rounded-2xl border px-3 py-2 text-[15px] font-semibold leading-tight transition active:scale-[0.98]',
-        tone === 'primary' && 'border-accent bg-accent text-accent-ink',
-        tone === 'good' && 'border-good/30 bg-good-soft text-good',
-        tone === 'bad' && 'border-bad/30 bg-bad-soft text-bad',
-        tone === 'neutral' && 'border-line bg-surface text-ink',
+        'min-h-10 rounded-full border px-3 py-1.5 text-[13.5px] font-semibold leading-tight transition active:scale-[0.97]',
+        on ? 'border-accent bg-accent text-accent-ink' : 'border-line bg-surface text-ink',
       )}
     >
       {children}
@@ -53,178 +70,207 @@ function Big({ tone, testid, onClick, children }: { tone: 'primary' | 'good' | '
   );
 }
 
-/** Serve → outcome with forehand / backhand: two taps for most points. */
-function PointEntry({ e, nm, count, onPoint }: { e: Engine; nm: Record<Side, string>; count: number; onPoint: (p: Point) => void }) {
-  const { t } = useStore();
-  const [stage, setStage] = useState<'serve1' | 'serve2' | 'rally'>('serve1');
-  const [serveNo, setServeNo] = useState<1 | 2>(1);
-  useEffect(() => setStage('serve1'), [count]);
-  const server = serverOf(e);
-  const receiver = other(server);
-  const court = courtOf(e);
-  const tone = (side: Side) => (side === 'p' ? 'good' : 'bad');
-  const point = (p: Point) => {
-    setStage('serve1');
-    onPoint(p);
-  };
-  const n: 1 | 2 = stage === 'serve2' ? 2 : 1;
-
-  const column = (side: Side) => {
-    const loser = other(side);
-    const items: { end: PointEnd; label: string }[] = [
-      { end: 'winner', label: t('winnerBtn') },
-      ...(side === receiver ? [{ end: 'returnWinner' as const, label: t('end_returnWinner') }] : []),
-      { end: 'forcedError', label: t('errBy', { name: shortName(nm[loser]), err: t('end_forcedError') }) },
-      { end: 'unforcedError', label: t('errBy', { name: shortName(nm[loser]), err: t('end_unforcedError') }) },
-      ...(loser === receiver ? [{ end: 'returnError' as const, label: t('errBy', { name: shortName(nm[loser]), err: t('end_returnError') }) }] : []),
-    ];
-    return (
-      <div className="flex min-w-0 flex-col gap-2" data-column={side}>
-        <div className={cx('rounded-full py-1 text-center text-[13px] font-bold', side === 'p' ? 'bg-good-soft text-good' : 'bg-bad-soft text-bad')}>{t('pointTo', { name: shortName(nm[side]) })}</div>
-        {items.map((it) => {
-          const ret = it.end === 'returnWinner' || it.end === 'returnError';
-          return (
-            <div key={it.end} className={cx('rounded-2xl border p-1.5', side === 'p' ? 'border-good/30 bg-good-soft' : 'border-bad/30 bg-bad-soft')} data-row={`${side}-${it.end}`}>
-              <div className={cx('ui-bidi px-1.5 pb-1 text-[12.5px] font-bold leading-tight', side === 'p' ? 'text-good' : 'text-bad')}>{it.label}</div>
-              <div className="grid grid-cols-2 gap-1.5">
-                {(['fh', 'bh'] as Wing[]).map((w) => (
-                  <button
-                    key={w}
-                    type="button"
-                    data-testid={`${side}-${it.end}-${w}`}
-                    onClick={() => point(bare(side, serveNo, it.end, { wing: w, shot: 'drive', rally: ret ? 'short' : null }))}
-                    className={cx('min-h-[46px] rounded-xl bg-surface px-1.5 text-[14px] font-semibold leading-tight transition active:scale-[0.97]', side === 'p' ? 'text-good' : 'text-bad')}
-                  >
-                    <span className="sm:hidden">{t(`wingShort_${w}` as DictKey)}</span>
-                    <span className="hidden sm:inline">{wingLabel(t, w)}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-        <Big tone={tone(side)} testid={`${side}-other`} onClick={() => point(bare(side, serveNo, 'other'))}>
-          {t('otherPoint')}
-        </Big>
-      </div>
-    );
-  };
-
+function ChipRow({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
-    <Card className="p-4" as="div">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <p className="ui-bidi text-sm" data-testid="serve-status">
-          <span className="eyebrow me-1">{t('serving')}</span>
-          <strong>{shortName(nm[server])}</strong> · {stage === 'rally' ? (serveNo === 1 ? t('firstServe') : t('secondServe')) : n === 1 ? t('firstServe') : t('secondServe')}
-          {court && (
-            <>
-              {' · '}
-              <span className="font-semibold text-accent" data-testid="court-side">{courtLabel(t, court)}</span>
-            </>
-          )}
-        </p>
-        {stage !== 'serve1' && (
-          <Button size="sm" variant="ghost" onClick={() => setStage(stage === 'rally' ? (serveNo === 2 ? 'serve2' : 'serve1') : 'serve1')} data-testid="entry-back">
-            {t('back')}
-          </Button>
-        )}
-      </div>
-      {stage !== 'rally' ? (
-        <div className="grid grid-cols-2 gap-2">
-          <Big
-            tone="primary"
-            testid="serve-in"
-            onClick={() => {
-              setServeNo(n);
-              setStage('rally');
-            }}
-          >
-            {n === 1 ? t('serveIn1') : t('serveIn2')}
-          </Big>
-          {n === 1 ? (
-            <Big tone="neutral" testid="fault" onClick={() => setStage('serve2')}>
-              {t('fault')}
-            </Big>
-          ) : (
-            <Big tone={tone(receiver)} testid="double-fault" onClick={() => point(bare(receiver, 2, 'doubleFault', { shot: 'serve', rally: 'short' }))}>
-              {t('end_doubleFault')}
-            </Big>
-          )}
-          <Big tone={tone(server)} testid="ace" onClick={() => point(bare(server, n, 'ace', { shot: 'serve', rally: 'short' }))}>
-            {t('end_ace')}
-          </Big>
-          <Big tone={tone(server)} testid="service-winner" onClick={() => point(bare(server, n, 'serviceWinner', { shot: 'serve', rally: 'short' }))}>
-            {t('end_serviceWinner')}
-          </Big>
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 gap-2">
-          {column('p')}
-          {column('o')}
-        </div>
-      )}
-    </Card>
+    <div className="grid gap-1.5 sm:grid-cols-[7.25rem_minmax(0,1fr)] sm:items-start">
+      <span className="ui-bidi text-[12px] font-semibold text-muted sm:pt-2.5">{label}</span>
+      <div className="flex flex-wrap gap-1.5">{children}</div>
+    </div>
   );
 }
 
-const RALLY_SHOTS: ShotType[] = ['drive', 'slice', 'drop', 'lob', 'approach', 'pass', 'volley', 'halfVolley', 'overhead'];
-
-/** Detail for the point just recorded: wing, kind of shot, rally length, net, serve direction. */
-function LastPointDetail({ p, c, nm, onChange }: { p: Point; c: PointCtx; nm: Record<Side, string>; onChange: (patch: Partial<Point>) => void }) {
-  const { t } = useStore();
-  const serveEnd = p.end === 'ace' || p.end === 'serviceWinner' || p.end === 'doubleFault';
-  const returnEnd = p.end === 'returnWinner' || p.end === 'returnError';
-  const rallyEnd = p.end === 'winner' || p.end === 'forcedError' || p.end === 'unforcedError';
-  const chip = (sel: boolean, label: string, testid: string, onClick: () => void) => (
+/** A result button: green when the point goes to the player, red when it goes to the opponent. */
+function Outcome({ win, testid, label, quiet, onClick }: { win: Side; testid: string; label: string; quiet?: boolean; onClick: () => void }) {
+  return (
     <button
-      key={testid}
       type="button"
-      aria-pressed={sel}
       data-testid={testid}
+      data-win={win}
       onClick={onClick}
-      className={cx('min-h-9 rounded-full border px-3 py-1 text-[13px] font-semibold', sel ? 'border-accent bg-accent text-accent-ink' : 'border-line bg-surface')}
+      className={cx(
+        'ui-bidi rounded-2xl border px-2 py-1.5 text-center font-semibold leading-tight transition active:scale-[0.97]',
+        quiet ? 'min-h-11 text-[13px]' : 'min-h-[56px] text-[13.5px] sm:text-[14.5px]',
+        win === 'p' ? 'border-good/30 bg-good-soft text-good' : 'border-bad/30 bg-bad-soft text-bad',
+      )}
     >
       {label}
     </button>
   );
-  const row = (label: string, children: ReactNode) => (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span className="w-full shrink-0 text-[12px] font-semibold text-muted sm:w-28">{label}</span>
-      {children}
+}
+
+function OutcomeRow({ label, testid, children }: { label: string; testid: string; children: ReactNode }) {
+  return (
+    <div className="grid gap-1 sm:grid-cols-[7.25rem_minmax(0,1fr)] sm:items-center sm:gap-2 @4xl:grid-cols-[5.5rem_minmax(0,1fr)]" data-row={testid}>
+      <span className="ui-bidi text-[12.5px] font-bold leading-tight">{label}</span>
+      <div className="grid grid-cols-3 gap-1.5">{children}</div>
     </div>
   );
+}
+
+/** "2nd serve · T · Forehand · Volley · 5–8 shots · Ela at the net" — what the next tap will save. */
+function draftText(d: PointDraft, nm: Record<Side, string>, t: ReturnType<typeof useStore>['t']): string {
+  const parts: string[] = [d.serve === 1 ? t('firstServe') : t('secondServe')];
+  if (d.dir) parts.push(dirLabel(t, d.dir));
+  const stroke = strokeText(t, d.shot === 'overhead' ? null : d.wing, d.shot);
+  if (stroke) parts.push(stroke);
+  if (d.rally) parts.push(rallyLabel(t, d.rally));
+  if (d.netP) parts.push(t('atNetShort', { name: shortName(nm.p) }));
+  if (d.netO) parts.push(t('atNetShort', { name: shortName(nm.o) }));
+  return parts.join(' · ');
+}
+
+/**
+ * Everything for one point on one screen: pick any detail (serve, direction, forehand / backhand,
+ * kind of shot, rally length, net) in any order, then tap how the point ended — that tap saves it.
+ */
+/** Mounted afresh for every point (keyed by the point count), starting from `seed` after an undo. */
+function PointComposer({ e, nm, seed, onPoint }: { e: Engine; nm: Record<Side, string>; seed: PointDraft | null; onPoint: (p: Point, oppNet: boolean) => void }) {
+  const { t } = useStore();
+  const [d, setD] = useState<PointDraft>(seed ?? EMPTY_DRAFT);
+  const server = serverOf(e);
+  const receiver = other(server);
+  const court = courtOf(e);
+  const name = (s: Side) => shortName(nm[s]);
+  const toggle = <K extends 'wing' | 'shot' | 'rally' | 'dir'>(k: K, v: NonNullable<PointDraft[K]>) => setD((x) => ({ ...x, [k]: x[k] === v ? null : v }) as PointDraft);
+  const tap = (actor: Side, end: PointEnd) => {
+    const r = composePoint(d, actor, end);
+    onPoint(r.point, r.oppNet);
+  };
+  const dirty = d.serve !== 1 || d.wing || d.shot || d.rally || d.dir || d.netP || d.netO;
+
   return (
-    <Card className="p-4" as="div">
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-        <span className="eyebrow">
-          {t('lastPoint')}
-          {c.court && <> · {courtLabel(t, c.court)}</>}
-        </span>
-        <span className="ui-bidi text-sm font-semibold" data-testid="last-point">{pointText(p, c.server, nm, t)}</span>
-      </div>
-      <div className="flex flex-col gap-3">
-        {(rallyEnd || returnEnd) &&
-          row(
-            t('wingLabel'),
-            (['fh', 'bh'] as Wing[]).map((w) => chip(p.wing === w, wingLabel(t, w), `wing-${w}`, () => onChange({ wing: p.wing === w ? null : w, shot: p.shot === 'overhead' ? 'drive' : p.shot }))),
-          )}
-        {(rallyEnd || returnEnd) &&
-          row(
-            t('stroke'),
-            (returnEnd ? (['drive', 'slice'] as ShotType[]) : RALLY_SHOTS).map((s) =>
-              chip(p.shot === s, shotLabel(t, s), `type-${s}`, () => onChange({ shot: p.shot === s ? null : s, ...(s === 'overhead' ? { wing: null } : {}), ...(s === 'volley' || s === 'halfVolley' || s === 'overhead' ? { net: true } : {}) })),
-            ),
-          )}
-        {rallyEnd && row(t('rallyLen'), (['short', 'mid', 'long'] as Rally[]).map((r) => chip(p.rally === r, rallyLabel(t, r), `rally-${r}`, () => onChange({ rally: p.rally === r ? null : r }))))}
-        {rallyEnd && row(t('netLabel'), chip(p.net, t('atNet', { name: shortName(nm.p) }), 'net-toggle', () => onChange({ net: !p.net })))}
-        {p.end !== 'doubleFault' &&
-          row(
-            t('serveDirLabel', { name: shortName(nm[c.server]) }),
-            (['wide', 'body', 't'] as ServeDir[]).map((d) => chip(p.dir === d, dirLabel(t, d), `dir-${d}`, () => onChange({ dir: p.dir === d ? null : d }))),
-          )}
-        {serveEnd && p.end === 'doubleFault' && <p className="text-[13px] text-muted">{t('noDetailNeeded')}</p>}
+    <Card className="@container p-3 sm:p-4" as="div">
+      <div className="flex flex-col gap-3" data-testid="point-composer">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="ui-bidi text-sm" data-testid="serve-status">
+            <span className="eyebrow me-1">{t('serving')}</span>
+            <strong>{name(server)}</strong>
+            {court && (
+              <>
+                {' · '}
+                <span className="font-semibold text-accent" data-testid="court-side">{courtLabel(t, court)}</span>
+              </>
+            )}
+          </p>
+          <div role="radiogroup" aria-label={t('serveNumber')} className="flex gap-1 rounded-full border border-line bg-sunken p-1">
+            {([1, 2] as const).map((n) => (
+              <button
+                key={n}
+                type="button"
+                role="radio"
+                aria-checked={d.serve === n}
+                data-testid={`serve-${n}`}
+                // The direction belongs to the serve that started the point: a fault clears it.
+                onClick={() => setD((x) => ({ ...x, serve: n, dir: x.serve === n ? x.dir : null }))}
+                className={cx('min-h-9 rounded-full px-3.5 text-[13.5px] font-semibold', d.serve === n ? 'bg-band text-band-ink' : 'text-muted')}
+              >
+                {n === 1 ? t('firstServe') : t('faultSecondServe')}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid gap-3 @4xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] @4xl:gap-5">
+          <div className="flex flex-col gap-3">
+            <ChipRow label={t('serveDirLabel', { name: name(server) })}>
+              {SERVE_DIRS.map((x) => (
+                <Chip key={x} on={d.dir === x} testid={`dir-${x}`} onClick={() => toggle('dir', x)}>
+                  {dirLabel(t, x)}
+                </Chip>
+              ))}
+            </ChipRow>
+            <ChipRow label={t('lastShot')}>
+              {WINGS.map((w) => (
+                <Chip key={w} on={d.wing === w} testid={`wing-${w}`} onClick={() => toggle('wing', w)}>
+                  {wingLabel(t, w)}
+                </Chip>
+              ))}
+              <span className="mx-0.5 w-px self-stretch bg-line" aria-hidden="true" />
+              {COMPOSER_SHOTS.map((s) => (
+                <Chip key={s} on={d.shot === s} testid={`type-${s}`} onClick={() => toggle('shot', s)}>
+                  {shotLabel(t, s)}
+                </Chip>
+              ))}
+            </ChipRow>
+            <ChipRow label={t('rallyLen')}>
+              {RALLY.map((r) => (
+                <Chip key={r} on={d.rally === r} testid={`rally-${r}`} onClick={() => toggle('rally', r)}>
+                  {rallyLabel(t, r)}
+                </Chip>
+              ))}
+            </ChipRow>
+            <ChipRow label={t('netLabel')}>
+              <Chip on={d.netP} testid="net-p" onClick={() => setD((x) => ({ ...x, netP: !x.netP }))}>
+                {t('atNetShort', { name: name('p') })}
+              </Chip>
+              <Chip on={d.netO} testid="net-o" onClick={() => setD((x) => ({ ...x, netO: !x.netO }))}>
+                {t('atNetShort', { name: name('o') })}
+              </Chip>
+            </ChipRow>
+          </div>
+          <div className="flex flex-col gap-2 border-t border-line pt-3 @4xl:border-s @4xl:border-t-0 @4xl:ps-5 @4xl:pt-0">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+              <p className="ui-bidi text-[13px] font-semibold" data-testid="draft-summary">
+                <span className="text-muted">{t('thisPoint')}: </span>
+                {draftText(d, nm, t)}
+              </p>
+              {dirty && (
+                <button type="button" className="text-[13px] font-semibold text-accent" onClick={() => setD(EMPTY_DRAFT)} data-testid="draft-clear">
+                  {t('clearChoices')}
+                </button>
+              )}
+            </div>
+            <p className="ui-bidi text-[12px] text-muted">{t('howEndedHelp', { p: name('p'), o: name('o') })}</p>
+            <OutcomeRow label={t('serveBy', { name: name(server) })} testid="serve">
+              <Outcome win={server} testid={`${server}-ace`} label={t('end_ace')} onClick={() => tap(server, 'ace')} />
+              <Outcome win={server} testid={`${server}-serviceWinner`} label={t('end_serviceWinner')} onClick={() => tap(server, 'serviceWinner')} />
+              <Outcome win={receiver} testid={`${server}-doubleFault`} label={t('end_doubleFault')} onClick={() => tap(server, 'doubleFault')} />
+            </OutcomeRow>
+            <OutcomeRow label={t('returnBy', { name: name(receiver) })} testid="return">
+              <Outcome win={receiver} testid={`${receiver}-returnWinner`} label={t('end_returnWinner')} onClick={() => tap(receiver, 'returnWinner')} />
+              <Outcome win={server} testid={`${receiver}-returnError`} label={t('end_returnError')} onClick={() => tap(receiver, 'returnError')} />
+            </OutcomeRow>
+            {(['p', 'o'] as Side[]).map((s) => (
+              <OutcomeRow key={s} label={name(s)} testid={`rally-${s}`}>
+                <Outcome win={s} testid={`${s}-winner`} label={t('end_winner')} onClick={() => tap(s, 'winner')} />
+                <Outcome win={other(s)} testid={`${s}-forcedError`} label={t('end_forcedError')} onClick={() => tap(s, 'forcedError')} />
+                <Outcome win={other(s)} testid={`${s}-unforcedError`} label={t('end_unforcedError')} onClick={() => tap(s, 'unforcedError')} />
+              </OutcomeRow>
+            ))}
+            <OutcomeRow label={t('notSeen')} testid="other">
+              {(['p', 'o'] as Side[]).map((s) => (
+                <Outcome key={s} quiet win={s} testid={`${s}-other`} label={t('pointFor', { name: name(s) })} onClick={() => tap(s, 'other')} />
+              ))}
+            </OutcomeRow>
+          </div>
+        </div>
       </div>
     </Card>
+  );
+}
+
+/** What was saved for the point just played, with undo (which hands its details back for a fix). */
+function LastPoint({ p, c, nm, count, onUndo }: { p: Point; c: PointCtx; nm: Record<Side, string>; count: number; onUndo: () => void }) {
+  const { t } = useStore();
+  const extra: string[] = [];
+  if (p.serve === 2 && p.end !== 'doubleFault') extra.push(t('secondServe'));
+  if (p.dir && p.end !== 'ace' && p.end !== 'serviceWinner') extra.push(dirLabel(t, p.dir));
+  if (p.rally && p.end !== 'ace' && p.end !== 'serviceWinner' && p.end !== 'doubleFault' && p.end !== 'returnWinner' && p.end !== 'returnError') extra.push(rallyLabel(t, p.rally));
+  if (p.net) extra.push(t('atNetShort', { name: shortName(nm.p) }));
+  if (c.oppNet) extra.push(t('atNetShort', { name: shortName(nm.o) }));
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-2xl border border-line bg-surface px-3 py-2">
+      <span className={cx('h-2.5 w-2.5 shrink-0 rounded-full', p.win === 'p' ? 'bg-good' : 'bg-bad')} aria-hidden="true" />
+      <span className="ui-bidi min-w-0 flex-1 text-sm">
+        <span className="eyebrow me-1.5">{t('lastPoint')}</span>
+        <strong data-testid="last-point">{pointText(p, c.server, nm, t)}</strong>
+        {extra.length > 0 && <span className="text-muted" data-testid="last-point-extra"> · {extra.join(' · ')}</span>}
+      </span>
+      <span className="num text-[12px] text-muted">{t('pointsPlayed', { n: count })}</span>
+      <Button size="sm" onClick={onUndo} data-testid="undo-point">
+        ↶ {t('undoPoint')}
+      </Button>
+    </div>
   );
 }
 
@@ -252,7 +298,7 @@ export function PointList({ ctx, nm, noAd, limit }: { ctx: PointCtx[]; nm: Recor
           <span className="num w-40 shrink-0 font-mono text-[12px] text-muted" dir="ltr">{ctxScore(c, noAd)}</span>
           <span className="w-14 shrink-0 text-[11px] font-semibold text-muted">{c.court ? t(`courtShort_${c.court}` as DictKey) : '—'}</span>
           <span className={cx('h-2 w-2 shrink-0 rounded-full', c.point.win === 'p' ? 'bg-good' : 'bg-bad')} aria-hidden="true" />
-          <span className="ui-bidi min-w-0 flex-1">
+          <span className="ui-bidi min-w-[12rem] flex-1">
             {pointText(c.point, c.server, nm, t)}
             {c.point.serve === 2 && c.point.end !== 'doubleFault' && <span className="text-muted"> · {t('secondServe')}</span>}
           </span>
@@ -343,14 +389,25 @@ function MatchLive({ m }: { m: Match }) {
   const st = useMemo(() => statsFromReplay(r), [r]);
   const [finishing, setFinishing] = useState(false);
   const [editing, setEditing] = useState(false);
+  /** Details handed back to the point screen by undo, so the last point can be corrected. */
+  const [seed, setSeed] = useState<PointDraft | null>(null);
   const e = r.engine;
 
-  const savePoints = (points: string[]) => {
-    const next: Match = { ...m, points };
+  const addPoint = (p: Point, oppNet: boolean) => {
+    const n = m.points.length;
+    const next: Match = { ...m, points: [...m.points, encodePoint(p)], oppNet: [...m.oppNet.filter((i) => i < n), ...(oppNet ? [n] : [])] };
     const done = replay(next).engine.winner;
     if (done) Object.assign(next, { status: 'done', winner: done, endReason: 'completed' });
+    setSeed(null);
     dispatch({ type: 'saveMatch', match: next });
     if (done) toast(t('matchOverToast', { name: nm[done] }));
+  };
+  const undo = () => {
+    const i = m.points.length - 1;
+    if (i < 0) return;
+    setSeed(draftOf(decodePoint(m.points[i]), m.oppNet.includes(i)));
+    dispatch({ type: 'saveMatch', match: { ...m, points: m.points.slice(0, -1), oppNet: m.oppNet.filter((k) => k < i) } });
+    toast(t('pointUndoneFix'));
   };
   const last = r.points[r.points.length - 1];
   const lastCtx = r.ctx[r.ctx.length - 1];
@@ -369,39 +426,15 @@ function MatchLive({ m }: { m: Match }) {
         )}
       </PageHeader>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-        <div className="flex min-w-0 flex-col gap-4">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+        <div className="flex min-w-0 flex-col gap-3">
           <div className="live-sticky z-20">
             <Scoreboard e={e} live nm={nm} />
           </div>
           {canEdit ? (
             <>
-              <PointEntry e={e} nm={nm} count={m.points.length} onPoint={(p) => savePoints([...m.points, encodePoint(p)])} />
-              {last && lastCtx && (
-                <LastPointDetail
-                  p={last}
-                  c={lastCtx}
-                  nm={nm}
-                  onChange={(patch) => {
-                    const pts = [...m.points];
-                    pts[pts.length - 1] = encodePoint({ ...decodePoint(pts[pts.length - 1]), ...patch });
-                    dispatch({ type: 'saveMatch', match: { ...m, points: pts } });
-                  }}
-                />
-              )}
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  disabled={!m.points.length}
-                  onClick={() => {
-                    dispatch({ type: 'saveMatch', match: { ...m, points: m.points.slice(0, -1) } });
-                    toast(t('pointUndone'));
-                  }}
-                  data-testid="undo-point"
-                >
-                  ↶ {t('undoPoint')}
-                </Button>
-                <span className="num text-[13px] text-muted">{t('pointsPlayed', { n: r.ctx.length })}</span>
-              </div>
+              {last && lastCtx && <LastPoint p={last} c={lastCtx} nm={nm} count={r.ctx.length} onUndo={undo} />}
+              <PointComposer key={m.points.length} e={e} nm={nm} seed={seed} onPoint={addPoint} />
             </>
           ) : (
             <p className="rounded-xl bg-sunken p-3 text-sm text-muted">{t('liveFollowHelp')}</p>

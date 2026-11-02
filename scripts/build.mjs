@@ -46,7 +46,10 @@ async function buildCSS() {
   // Candidate scan (what Tailwind's oxide scanner does): every token-like string in the sources.
   const candidates = new Set();
   for (const f of [...walk(path.join(root, 'src'), ['.tsx', '.ts']), path.join(root, 'index.html')]) {
-    for (const m of fs.readFileSync(f, 'utf8').matchAll(/[^\s"'`{}()<>;,\\]+/g)) candidates.add(m[0]);
+    const src = fs.readFileSync(f, 'utf8');
+    for (const m of src.matchAll(/[^\s"'`{}()<>;,\\]+/g)) candidates.add(m[0]);
+    // Arbitrary values can hold parentheses and commas, e.g. grid-cols-[minmax(0,1fr)_auto].
+    for (const m of src.matchAll(/[^\s"'`{}()<>;,\\]*\[[^\s"'`\]]+\][^\s"'`{}()<>;,\\]*/g)) candidates.add(m[0]);
   }
   const css = compiler.build([...candidates]);
   const min = await esbuild.transform(css, { loader: 'css', minify: true });

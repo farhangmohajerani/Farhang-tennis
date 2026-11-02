@@ -1,5 +1,5 @@
 /** Shared pieces for matches and tournaments: labels, scoreboard, statistics, momentum chart. */
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import type { DictKey } from '../lib/i18n';
 import { formatDate } from '../lib/i18n';
 import { useStore } from '../lib/store';
@@ -11,6 +11,7 @@ import {
   peek,
   scoreboardSets,
   serverOf,
+  strokeKey,
   summary,
   type DisplaySet,
   type Engine,
@@ -169,7 +170,7 @@ export function Scoreboard({ e, live, nm, compact }: { e: Engine; live: boolean;
 type Pair = [number, number];
 const pctText = ([a, b]: Pair) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '—');
 
-function StatRow({ label, p, o, pct, invert }: { label: string; p: number | Pair; o: number | Pair; pct?: boolean; invert?: boolean }) {
+function StatRow({ label, p, o, pct, invert, testid }: { label: string; p: number | Pair; o: number | Pair; pct?: boolean; invert?: boolean; testid?: string }) {
   const val = (x: number | Pair) => (Array.isArray(x) ? (x[1] > 0 ? x[0] / x[1] : null) : x);
   const vp = val(p);
   const vo = val(o);
@@ -190,7 +191,7 @@ function StatRow({ label, p, o, pct, invert }: { label: string; p: number | Pair
     );
   };
   return (
-    <tr className="border-b border-line last:border-0">
+    <tr className="border-b border-line last:border-0" data-stat={testid}>
       {cell(p, 'p')}
       <th scope="row" className="px-1 py-1.5 text-center text-[12px] font-semibold text-muted">{label}</th>
       {cell(o, 'o')}
@@ -198,10 +199,25 @@ function StatRow({ label, p, o, pct, invert }: { label: string; p: number | Pair
   );
 }
 
+function SectionRow({ label }: { label: string }) {
+  return (
+    <tr className="border-b border-line bg-sunken">
+      <th colSpan={3} scope="colgroup" className="px-3 py-1.5 text-center text-[12px] font-bold text-ink">
+        {label}
+      </th>
+    </tr>
+  );
+}
+
+/**
+ * Match statistics in the categories Grand Slam and ATP/WTA match pages use, plus what manual
+ * charting adds (returns in play, unreturned serves, net points for both players).
+ */
 export function StatsTable({ st, nm }: { st: MatchStats; nm: Record<Side, string> }) {
   const { t } = useStore();
   const P = st.p;
   const O = st.o;
+  const svcWon = (x: MatchStats['p']): Pair => [x.firstWon + x.secondWon, x.servicePoints];
   return (
     <div className="overflow-hidden rounded-2xl border border-line bg-surface" data-testid="stats-table">
       <table className="num w-full table-fixed text-sm" dir="ltr">
@@ -213,22 +229,33 @@ export function StatsTable({ st, nm }: { st: MatchStats; nm: Record<Side, string
           </tr>
         </thead>
         <tbody>
+          <SectionRow label={t('secServe')} />
           <StatRow label={t('st_aces')} p={P.aces} o={O.aces} />
           <StatRow label={t('st_df')} p={P.doubleFaults} o={O.doubleFaults} invert />
           <StatRow label={t('st_firstIn')} p={[P.firstIn, P.servicePoints]} o={[O.firstIn, O.servicePoints]} pct />
           <StatRow label={t('st_firstWon')} p={[P.firstWon, P.firstIn]} o={[O.firstWon, O.firstIn]} pct />
           <StatRow label={t('st_secondWon')} p={[P.secondWon, P.secondPlayed]} o={[O.secondWon, O.secondPlayed]} pct />
+          <StatRow label={t('st_svcPtsWon')} p={svcWon(P)} o={svcWon(O)} pct testid="svc-pts" />
+          <StatRow label={t('st_svcWinners')} p={P.serviceWinners} o={O.serviceWinners} />
           <StatRow label={t('st_bpSaved')} p={[P.bpSaved, P.bpFaced]} o={[O.bpSaved, O.bpFaced]} pct />
           <StatRow label={t('st_svcGames')} p={[P.serviceGamesWon, P.serviceGames]} o={[O.serviceGamesWon, O.serviceGames]} pct />
+          <SectionRow label={t('secReturn')} />
           <StatRow label={t('st_retWon')} p={[P.returnWon, P.returnPoints]} o={[O.returnWon, O.returnPoints]} pct />
           <StatRow label={t('st_ret1')} p={[P.returnFirstWon, P.returnFirstPlayed]} o={[O.returnFirstWon, O.returnFirstPlayed]} pct />
           <StatRow label={t('st_ret2')} p={[P.returnSecondWon, P.returnSecondPlayed]} o={[O.returnSecondWon, O.returnSecondPlayed]} pct />
+          <StatRow label={t('st_retIn1')} p={[P.returnIn1, P.returnFaced1]} o={[O.returnIn1, O.returnFaced1]} pct testid="ret-in-1" />
+          <StatRow label={t('st_retIn2')} p={[P.returnIn2, P.returnFaced2]} o={[O.returnIn2, O.returnFaced2]} pct testid="ret-in-2" />
+          <StatRow label={t('st_retErr')} p={P.returnErrors} o={O.returnErrors} invert />
           <StatRow label={t('st_bpConv')} p={[P.bpConverted, P.bpChances]} o={[O.bpConverted, O.bpChances]} pct />
+          <StatRow label={t('st_retGames')} p={[P.returnGamesWon, P.returnGames]} o={[O.returnGamesWon, O.returnGames]} pct />
+          <SectionRow label={t('secPoints')} />
           <StatRow label={t('st_winners')} p={P.winners} o={O.winners} />
-          <StatRow label={t('st_svcWinners')} p={P.serviceWinners} o={O.serviceWinners} />
           <StatRow label={t('st_ue')} p={P.unforcedErrors} o={O.unforcedErrors} invert />
           <StatRow label={t('st_fe')} p={P.forcedErrors} o={O.forcedErrors} invert />
-          <StatRow label={t('st_retErr')} p={P.returnErrors} o={O.returnErrors} invert />
+          <StatRow label={t('st_netWon')} p={[st.net.p.won, st.net.p.played]} o={[st.net.o.won, st.net.o.played]} pct testid="net" />
+          {st.tbPoints > 0 && <StatRow label={t('st_tbWon')} p={[P.tbPointsWon, st.tbPoints]} o={[O.tbPointsWon, st.tbPoints]} pct testid="tb" />}
+          <StatRow label={t('st_maxPoints')} p={P.maxPointRun} o={O.maxPointRun} testid="max-points" />
+          <StatRow label={t('st_maxGames')} p={P.maxGameRun} o={O.maxGameRun} testid="max-games" />
           <StatRow label={t('st_total')} p={[P.pointsWon, st.points]} o={[O.pointsWon, st.points]} pct />
         </tbody>
       </table>
@@ -236,10 +263,9 @@ export function StatsTable({ st, nm }: { st: MatchStats; nm: Record<Side, string
   );
 }
 
-type Pair2 = [number, number];
-const pctCell = ([a, b]: Pair2) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '—');
+const pctCell = ([a, b]: Pair) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '—');
 
-function Frac({ v }: { v: Pair2 }) {
+function Frac({ v }: { v: Pair }) {
   return (
     <span className="whitespace-nowrap">
       <span className="font-mono text-[15px] font-semibold">{pctCell(v)}</span> <span className="text-[11px] text-muted">{v[0]}/{v[1]}</span>
@@ -247,192 +273,289 @@ function Frac({ v }: { v: Pair2 }) {
   );
 }
 
-function Panel({ title, help, children, testid }: { title: string; help?: string; children: ReactNode; testid?: string }) {
+function Panel({ title, help, children, testid }: { title: ReactNode; help?: string; children: ReactNode; testid?: string }) {
   return (
-    <div className="rounded-2xl border border-line bg-surface p-4" data-testid={testid}>
-      <h3 className="font-semibold">{title}</h3>
+    <div className="min-w-0 rounded-2xl border border-line bg-surface p-4" data-testid={testid}>
+      <h3 className="ui-bidi font-semibold">{title}</h3>
       {help && <p className="mt-0.5 text-[12px] text-muted">{help}</p>}
       <div className="mt-3">{children}</div>
     </div>
   );
 }
 
-/** Deuce / ad court, returns by wing, rally shots by kind, serve direction, rally length — for either player. */
+/* ---------- winners and errors, one chart per player ---------- */
+
+interface Bar {
+  key: string;
+  label: string;
+  /** Winners, or unforced errors (and serve / return errors, which are not split). */
+  a: number;
+  /** Forced errors (rally shots only). */
+  b: number;
+}
+type GroupKey = 'serve' | 'return' | 'rally';
+
+function rowsOf(st: MatchStats, side: Side, kind: 'winners' | 'errors', t: T): { key: GroupKey; rows: Bar[] }[] {
+  const S = st[side];
+  const strokes = Object.values(st.strokes[side]);
+  // "Forehand", "FH · Slice", "Overhead": the short wing keeps two-part labels on one line.
+  const label = (r: { wing: Wing | null; shot: ShotType | null }) =>
+    r.wing && r.shot && r.shot !== 'drive' ? `${t(`wingShort_${r.wing}` as DictKey)} · ${shotLabel(t, r.shot)}` : strokeText(t, r.wing, r.shot) || t('wingUnknown');
+  const serve: Bar[] = [];
+  let ret: Bar[];
+  let rally: Bar[];
+  if (kind === 'winners') {
+    if (S.aces) serve.push({ key: 'aces', label: t('st_aces'), a: S.aces, b: 0 });
+    if (S.serviceWinners) serve.push({ key: 'unreturned', label: t('st_svcWinners'), a: S.serviceWinners, b: 0 });
+    ret = strokes.filter((r) => r.ret && r.winners > 0).map((r) => ({ key: strokeKey(r), label: label(r), a: r.winners, b: 0 }));
+    rally = strokes.filter((r) => !r.ret && r.winners > 0).map((r) => ({ key: strokeKey(r), label: label(r), a: r.winners, b: 0 }));
+  } else {
+    if (S.doubleFaults) serve.push({ key: 'df', label: t('st_df'), a: S.doubleFaults, b: 0 });
+    // Return errors are kept as the return stroke's "unforced" count (they are not split forced / unforced).
+    ret = strokes.filter((r) => r.ret && r.unforced > 0).map((r) => ({ key: strokeKey(r), label: label(r), a: r.unforced, b: 0 }));
+    rally = strokes.filter((r) => !r.ret && r.forced + r.unforced > 0).map((r) => ({ key: strokeKey(r), label: label(r), a: r.unforced, b: r.forced }));
+  }
+  const byTotal = (x: Bar, y: Bar) => y.a + y.b - (x.a + x.b) || x.label.localeCompare(y.label);
+  return (
+    [
+      { key: 'serve' as const, rows: serve },
+      { key: 'return' as const, rows: ret.sort(byTotal) },
+      { key: 'rally' as const, rows: rally.sort(byTotal) },
+    ] satisfies { key: GroupKey; rows: Bar[] }[]
+  ).filter((g) => g.rows.length > 0);
+}
+
+function BarChart({ side, kind, name, groups, max, testid }: { side: Side; kind: 'winners' | 'errors'; name: string; groups: { key: GroupKey; rows: Bar[] }[]; max: number; testid: string }) {
+  const { t } = useStore();
+  const main = side === 'p' ? 'bg-accent' : 'bg-muted';
+  const light = side === 'p' ? 'bg-accent-2' : 'bg-muted-2';
+  const total = groups.reduce((n, g) => n + g.rows.reduce((m, r) => m + r.a + r.b, 0), 0);
+  const groupLabel: Record<GroupKey, string> = { serve: t('grpServe'), return: t('grpReturn'), rally: t('grpRally') };
+  const hasForced = groups.some((g) => g.rows.some((r) => r.b > 0));
+  return (
+    <figure className="min-w-0 rounded-2xl border border-line bg-surface p-4" data-testid={testid}>
+      <figcaption className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <span className="ui-bidi font-semibold">{t(kind === 'winners' ? 'winnersOf' : 'errorsOf', { name })}</span>
+        <span className="num text-[13px] text-muted" data-testid={`${testid}-total`}>
+          {t('totalN', { n: total })}
+        </span>
+      </figcaption>
+      {kind === 'errors' && hasForced && (
+        <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted">
+          <span className="inline-flex items-center gap-1.5">
+            <span className={cx('h-2.5 w-2.5 rounded-[3px]', main)} aria-hidden="true" />
+            {t('colUnforced')}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className={cx('h-2.5 w-2.5 rounded-[3px]', light)} aria-hidden="true" />
+            {t('colForced')}
+          </span>
+          <span>{t('ueFeOrder')}</span>
+        </p>
+      )}
+      {groups.length === 0 ? (
+        <p className="mt-3 text-sm text-muted">{t(kind === 'winners' ? 'noWinnersYet' : 'noErrorsYet')}</p>
+      ) : (
+        <div className="mt-3 flex flex-col gap-3">
+          {groups.map((g) => (
+            <div key={g.key} data-group={g.key}>
+              <p className="mb-1.5 text-[11.5px] font-bold text-muted">{groupLabel[g.key]}</p>
+              <ul className="flex flex-col gap-1.5">
+                {g.rows.map((r) => {
+                  const n = r.a + r.b;
+                  const value = r.b > 0 ? `${r.a}+${r.b}` : String(r.a);
+                  const spoken = r.b > 0 ? `${r.label}: ${t('colUnforced')} ${r.a}, ${t('colForced')} ${r.b}` : `${r.label}: ${r.a}`;
+                  return (
+                    <li key={r.key} className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)_auto] items-center gap-2 text-[13px]" data-bar={r.key} aria-label={spoken} title={spoken}>
+                      <span className="ui-bidi truncate">{r.label}</span>
+                      <span className="flex h-3 min-w-0" aria-hidden="true">
+                        <span className="flex h-full gap-[2px]" style={{ width: `${(n / max) * 100}%` }}>
+                          {r.a > 0 && <span className={cx('h-full', main, r.b === 0 && 'rounded-e-[4px]')} style={{ flex: `${r.a} 1 0` }} />}
+                          {r.b > 0 && <span className={cx('h-full rounded-e-[4px]', light)} style={{ flex: `${r.b} 1 0` }} />}
+                        </span>
+                      </span>
+                      <span className="num min-w-[2.25rem] text-end font-mono text-[13px]" data-value>{value}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </figure>
+  );
+}
+
+/** Four charts: each player's winners and each player's errors, on shared scales so lengths compare. */
+export function WinnersErrorsCharts({ st, nm }: { st: MatchStats; nm: Record<Side, string> }) {
+  const { t } = useStore();
+  const data = {
+    winners: { p: rowsOf(st, 'p', 'winners', t), o: rowsOf(st, 'o', 'winners', t) },
+    errors: { p: rowsOf(st, 'p', 'errors', t), o: rowsOf(st, 'o', 'errors', t) },
+  };
+  const maxOf = (k: 'winners' | 'errors') => Math.max(1, ...(['p', 'o'] as Side[]).flatMap((s) => data[k][s].flatMap((g) => g.rows.map((r) => r.a + r.b))));
+  return (
+    <div className="grid gap-4 md:grid-cols-2" data-testid="winners-errors">
+      {(['winners', 'errors'] as const).flatMap((k) =>
+        (['p', 'o'] as Side[]).map((s) => <BarChart key={`${k}-${s}`} side={s} kind={k} name={shortName(nm[s])} groups={data[k][s]} max={maxOf(k)} testid={`chart-${k}-${s}`} />),
+      )}
+    </div>
+  );
+}
+
+/* ---------- serve and return by court, serve direction, rally length, net ---------- */
+
+function CourtPanel({ st, side, nm }: { st: MatchStats; side: Side; nm: Record<Side, string> }) {
+  const { t } = useStore();
+  const C = st.court[side];
+  return (
+    <Panel title={shortName(nm[side])} testid={`court-${side}`}>
+      <table className="num w-full text-sm">
+        <thead>
+          <tr className="text-[12px] text-muted">
+            <th className="py-1 text-start font-semibold" />
+            {COURT_SIDES.map((c) => (
+              <th key={c} className="py-1 text-end font-semibold">{courtLabel(t, c)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <tr className="border-t border-line">
+            <th scope="row" className="py-2 text-start font-semibold">{t('servePtsWon')}</th>
+            {COURT_SIDES.map((c) => (
+              <td key={c} className="py-2 text-end" data-testid={`serve-won-${side}-${c}`}><Frac v={[C[c].serveWon, C[c].servePlayed]} /></td>
+            ))}
+          </tr>
+          <tr className="border-t border-line">
+            <th scope="row" className="py-2 text-start font-normal text-muted">{t('st_firstIn')}</th>
+            {COURT_SIDES.map((c) => (
+              <td key={c} className="py-2 text-end"><Frac v={[C[c].firstIn, C[c].servePlayed]} /></td>
+            ))}
+          </tr>
+          <tr className="border-t border-line">
+            <th scope="row" className="py-2 text-start font-normal text-muted">{t('st_aces')} / {t('st_dfShort')}</th>
+            {COURT_SIDES.map((c) => (
+              <td key={c} className="py-2 text-end font-mono">{C[c].aces} / {C[c].doubleFaults}</td>
+            ))}
+          </tr>
+          <tr className="border-t-2 border-line">
+            <th scope="row" className="py-2 text-start font-semibold">{t('returnPtsWon')}</th>
+            {COURT_SIDES.map((c) => (
+              <td key={c} className="py-2 text-end" data-testid={`return-won-${side}-${c}`}><Frac v={[C[c].returnWon, C[c].returnPlayed]} /></td>
+            ))}
+          </tr>
+        </tbody>
+      </table>
+    </Panel>
+  );
+}
+
+function ServeDirPanel({ st, side, nm }: { st: MatchStats; side: Side; nm: Record<Side, string> }) {
+  const { t } = useStore();
+  const dirs = st.serveDir[side];
+  const any = COURT_SIDES.some((c) => SERVE_DIRS.some((d) => dirs[c][d].played > 0));
+  return (
+    <Panel title={shortName(nm[side])} testid={`serve-dir-${side}`}>
+      {!any ? (
+        <p className="text-sm text-muted">{t('serveDirEmpty')}</p>
+      ) : (
+        <table className="num w-full text-sm">
+          <thead>
+            <tr className="text-[12px] text-muted">
+              <th className="py-1 text-start font-semibold" />
+              {SERVE_DIRS.map((d) => (
+                <th key={d} className="py-1 text-end font-semibold">{dirLabel(t, d)}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {COURT_SIDES.map((c) => (
+              <tr key={c} className="border-t border-line">
+                <th scope="row" className="py-2 text-start font-semibold">{courtLabel(t, c)}</th>
+                {SERVE_DIRS.map((d) => (
+                  <td key={d} className="py-2 text-end">
+                    <span className="font-mono">{dirs[c][d].played}</span>
+                    {dirs[c][d].played > 0 && <span className="block text-[11px] text-muted">{t('wonPct', { pct: pctCell([dirs[c][d].won, dirs[c][d].played]) })}</span>}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Panel>
+  );
+}
+
+function SubHead({ title, help }: { title: string; help?: string }) {
+  return (
+    <div className="mb-3">
+      <h3 className="font-display text-xl leading-tight">{title}</h3>
+      {help && <p className="mt-0.5 text-[12.5px] text-muted">{help}</p>}
+    </div>
+  );
+}
+
+/** Winners and errors for both players, serve and return by court, serve direction, rally length, net. */
 export function DetailedAnalysis({ st, nm }: { st: MatchStats; nm: Record<Side, string> }) {
   const { t } = useStore();
-  const [who, setWho] = useState<Side>('p');
-  const C = st.court[who];
-  const R = st.returns[who];
-  const rows = Object.values(st.strokes[who])
-    .filter((r) => !r.ret)
-    .sort((a, b) => b.winners + b.forced + b.unforced - (a.winners + a.forced + a.unforced));
-  const dirs = st.serveDir[who];
-  const anyDir = COURT_SIDES.some((c) => SERVE_DIRS.some((d) => dirs[c][d].played > 0));
-  const name = shortName(nm[who]);
+  const sharePct = (won: number, played: number) => (played ? Math.round((won / played) * 100) : null);
   return (
-    <section data-testid="detailed-analysis">
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="font-display text-2xl leading-tight">{t('detailTitle')}</h2>
-        <div role="radiogroup" aria-label={t('detailTitle')} className="flex gap-1 rounded-full border border-line bg-surface p-1">
-          {(['p', 'o'] as Side[]).map((s) => (
-            <button
-              key={s}
-              type="button"
-              role="radio"
-              aria-checked={who === s}
-              onClick={() => setWho(s)}
-              data-testid={`who-${s}`}
-              className={cx('rounded-full px-3 py-1 text-[13px] font-semibold', who === s ? 'bg-band text-band-ink' : 'text-muted')}
-            >
-              {shortName(nm[s])}
-            </button>
-          ))}
+    <section data-testid="detailed-analysis" className="flex flex-col gap-7">
+      <div>
+        <SubHead title={t('weTitle')} help={t('weHelp')} />
+        <WinnersErrorsCharts st={st} nm={nm} />
+      </div>
+      <div>
+        <SubHead title={t('courtTitle')} help={t('courtHelpBoth')} />
+        <div className="grid gap-4 md:grid-cols-2" data-testid="court-sides">
+          <CourtPanel st={st} side="p" nm={nm} />
+          <CourtPanel st={st} side="o" nm={nm} />
+        </div>
+      </div>
+      <div>
+        <SubHead title={t('serveDirTitle')} help={t('serveDirHelpBoth')} />
+        <div className="grid gap-4 md:grid-cols-2" data-testid="serve-direction">
+          <ServeDirPanel st={st} side="p" nm={nm} />
+          <ServeDirPanel st={st} side="o" nm={nm} />
         </div>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
-        <Panel title={t('courtTitle')} help={t('courtHelp', { name })} testid="court-sides">
-          <table className="num w-full text-sm">
-            <thead>
-              <tr className="text-[12px] text-muted">
-                <th className="py-1 text-start font-semibold" />
-                {COURT_SIDES.map((c) => (
-                  <th key={c} className="py-1 text-end font-semibold">{courtLabel(t, c)}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="border-t border-line">
-                <th scope="row" className="py-2 text-start font-semibold">{t('servePtsWon')}</th>
-                {COURT_SIDES.map((c) => (
-                  <td key={c} className="py-2 text-end" data-testid={`serve-won-${c}`}><Frac v={[C[c].serveWon, C[c].servePlayed]} /></td>
-                ))}
-              </tr>
-              <tr className="border-t border-line">
-                <th scope="row" className="py-2 text-start font-normal text-muted">{t('st_firstIn')}</th>
-                {COURT_SIDES.map((c) => (
-                  <td key={c} className="py-2 text-end"><Frac v={[C[c].firstIn, C[c].servePlayed]} /></td>
-                ))}
-              </tr>
-              <tr className="border-t border-line">
-                <th scope="row" className="py-2 text-start font-normal text-muted">{t('st_aces')} / {t('st_dfShort')}</th>
-                {COURT_SIDES.map((c) => (
-                  <td key={c} className="py-2 text-end font-mono">{C[c].aces} / {C[c].doubleFaults}</td>
-                ))}
-              </tr>
-              <tr className="border-t-2 border-line">
-                <th scope="row" className="py-2 text-start font-semibold">{t('returnPtsWon')}</th>
-                {COURT_SIDES.map((c) => (
-                  <td key={c} className="py-2 text-end" data-testid={`return-won-${c}`}><Frac v={[C[c].returnWon, C[c].returnPlayed]} /></td>
-                ))}
-              </tr>
-            </tbody>
-          </table>
-        </Panel>
-
-        <Panel title={t('returnsTitle')} help={t('returnsHelp', { name })} testid="returns-by-wing">
-          <table className="num w-full text-sm">
-            <thead>
-              <tr className="text-[12px] text-muted">
-                <th className="py-1 text-start font-semibold" />
-                <th className="py-1 text-end font-semibold text-good">{t('end_returnWinner')}</th>
-                <th className="py-1 text-end font-semibold text-bad">{t('end_returnError')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(['fh', 'bh', 'unknown'] as const)
-                .filter((w) => w !== 'unknown' || R.unknown.winners + R.unknown.errors > 0)
-                .map((w) => (
-                  <tr key={w} className="border-t border-line">
-                    <th scope="row" className="py-2 text-start font-semibold">{w === 'unknown' ? t('wingUnknown') : wingLabel(t, w)}</th>
-                    <td className="py-2 text-end font-mono" data-testid={`ret-win-${w}`}>{R[w].winners}</td>
-                    <td className="py-2 text-end font-mono" data-testid={`ret-err-${w}`}>{R[w].errors}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </Panel>
-
-        <Panel title={t('shotsTitle')} help={t('shotsHelp', { name })} testid="shots-by-kind">
-          {rows.length === 0 ? (
-            <p className="text-sm text-muted">{t('noStrokes')}</p>
-          ) : (
-            <table className="num w-full text-sm">
-              <thead>
-                <tr className="text-[12px] text-muted">
-                  <th className="py-1 text-start font-semibold">{t('stroke')}</th>
-                  <th className="py-1 text-end font-semibold text-good">{t('colWinners')}</th>
-                  <th className="py-1 text-end font-semibold text-warn">{t('colForced')}</th>
-                  <th className="py-1 text-end font-semibold text-bad">{t('colUnforced')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={`${r.wing}:${r.shot}`} className="border-t border-line" data-stroke={`${r.wing ?? '-'}:${r.shot ?? '-'}`}>
-                    <th scope="row" className="py-1.5 text-start font-semibold">{strokeText(t, r.wing, r.shot) || t('wingUnknown')}</th>
-                    <td className="py-1.5 text-end font-mono">{r.winners}</td>
-                    <td className="py-1.5 text-end font-mono">{r.forced}</td>
-                    <td className="py-1.5 text-end font-mono">{r.unforced}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {who === 'p' && st.net.played > 0 && (
-            <p className="mt-3 border-t border-line pt-2 text-sm">
-              <span className="font-semibold">{t('st_netWon')}:</span> <Frac v={[st.net.won, st.net.played]} />
-            </p>
-          )}
-        </Panel>
-
-        <Panel title={t('serveDirTitle')} help={t('serveDirHelp', { name })} testid="serve-direction">
-          {!anyDir ? (
-            <p className="text-sm text-muted">{t('serveDirEmpty')}</p>
-          ) : (
-            <table className="num w-full text-sm">
-              <thead>
-                <tr className="text-[12px] text-muted">
-                  <th className="py-1 text-start font-semibold" />
-                  {SERVE_DIRS.map((d) => (
-                    <th key={d} className="py-1 text-end font-semibold">{dirLabel(t, d)}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {COURT_SIDES.map((c) => (
-                  <tr key={c} className="border-t border-line">
-                    <th scope="row" className="py-2 text-start font-semibold">{courtLabel(t, c)}</th>
-                    {SERVE_DIRS.map((d) => (
-                      <td key={d} className="py-2 text-end">
-                        <span className="font-mono">{dirs[c][d].played}</span>
-                        {dirs[c][d].played > 0 && <span className="block text-[11px] text-muted">{t('wonPct', { pct: pctCell([dirs[c][d].won, dirs[c][d].played]) })}</span>}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Panel>
-
-        <Panel title={t('rallyTitle')} help={t('rallyHelp', { name })} testid="rally-breakdown">
-          <ul className="flex flex-col gap-2.5">
+        <Panel title={t('rallyTitle')} help={t('rallyHelpBoth')} testid="rally-breakdown">
+          <ul className="flex flex-col gap-3">
             {(['short', 'mid', 'long'] as Rally[]).map((r) => {
               const x = st.rally[r];
-              const won = who === 'p' ? x.won : x.played - x.won;
-              const v = x.played ? won / x.played : null;
+              const v = sharePct(x.won, x.played);
               return (
-                <li key={r} className="num grid grid-cols-[72px_1fr_auto] items-center gap-2 text-sm">
-                  <span className="font-semibold">{rallyLabel(t, r)}</span>
-                  <span className="flex h-2.5 overflow-hidden rounded-full bg-sunken">
-                    <span className="h-full rounded-full bg-accent" style={{ width: `${v === null ? 0 : v * 100}%` }} />
-                  </span>
-                  <span className="font-mono text-[13px]">
-                    {v === null ? '—' : `${Math.round(v * 100)}%`} <span className="text-muted">{won}/{x.played}</span>
+                <li key={r} className="num text-sm" data-rally={r}>
+                  <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-3">
+                    <span className="font-semibold">{rallyLabel(t, r)}</span>
+                    <span className="ui-bidi text-[12.5px] text-muted">
+                      {v === null ? t('noPointsShort') : `${shortName(nm.p)} ${v}% · ${shortName(nm.o)} ${100 - v}% · ${t('pointsPlayed', { n: x.played })}`}
+                    </span>
+                  </div>
+                  <span className="flex h-2.5 overflow-hidden rounded-full bg-accent-soft" aria-hidden="true">
+                    <span className="h-full rounded-e-[4px] bg-accent" style={{ width: `${v ?? 0}%` }} />
                   </span>
                 </li>
               );
             })}
           </ul>
+        </Panel>
+        <Panel title={t('st_netWon')} help={t('netHelp')} testid="net-points">
+          <table className="num w-full text-sm">
+            <tbody>
+              {(['p', 'o'] as Side[]).map((s) => (
+                <tr key={s} className="border-t border-line first:border-0">
+                  <th scope="row" className="ui-bidi py-2 text-start font-semibold">{shortName(nm[s])}</th>
+                  <td className="py-2 text-end" data-testid={`net-${s}`}>
+                    {st.net[s].played ? <Frac v={[st.net[s].won, st.net[s].played]} /> : <span className="text-muted">{t('netNone')}</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </Panel>
       </div>
     </section>

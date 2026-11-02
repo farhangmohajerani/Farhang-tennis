@@ -2,7 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applyPoint,
+  composePoint,
   decodePoint,
+  draftOf,
+  EMPTY_DRAFT,
   encodePoint,
   engineSets,
   gameLabel,
@@ -14,6 +17,8 @@ import {
   replay,
   serverOf,
   setsText,
+  statsFromReplay,
+  sumStats,
   summary,
   type Engine,
   type Point,
@@ -22,6 +27,7 @@ import {
 import { evaluateGoal, evaluateTournament, furthestRound, makeTournament } from '../src/lib/competition';
 import { createDemoState } from '../src/data/demo';
 import { MatchSchema, POINT_RE, type Log, type Match, type MatchFormat } from '../src/types';
+import { hitterOf } from '../src/lib/match';
 
 const BO3: MatchFormat = { sets: 3, games: 6, finalSet: 'full', noAd: false };
 const JUNIOR: MatchFormat = { sets: 3, games: 6, finalSet: 'mtb', noAd: false };
@@ -114,6 +120,93 @@ test('serve and return by court side, serve direction, returns by forehand / bac
   assert.equal(Math.round(metricValue('adServeWon', st)!), 50);
   assert.equal(metricValue('deuceServeWon', st), 100);
   assert.equal(metricValue('adReturnWon', st), null, 'the player has not returned yet');
+});
+
+test('one tap saves the point: the row is the player who hit the last shot', () => {
+  const d = { ...EMPTY_DRAFT, wing: 'bh' as const, shot: 'slice' as const, rally: 'long' as const, dir: 'wide' as const };
+  // Player's backhand slice into the net: the point goes to the opponent.
+  let r = composePoint(d, 'p', 'unforcedError');
+  assert.deepEqual(r.point, { win: 'o', serve: 1, end: 'unforcedError', wing: 'bh', shot: 'slice', rally: 'long', net: false, dir: 'wide' });
+  assert.equal(r.oppNet, false);
+  // Opponent's forced error: point to the player; the stroke is the opponent's.
+  r = composePoint({ ...d, serve: 2 }, 'o', 'forcedError');
+  assert.equal(r.point.win, 'p');
+  assert.equal(r.point.serve, 2);
+  assert.equal(hitterOf(r.point, 'o'), 'o');
+  // Forehand only → a forehand drive; a volley puts its hitter at the net; a passing shot means the other player was there.
+  assert.equal(composePoint({ ...EMPTY_DRAFT, wing: 'fh' }, 'p', 'winner').point.shot, 'drive');
+  assert.equal(composePoint({ ...EMPTY_DRAFT, wing: 'fh', shot: 'volley' }, 'p', 'winner').point.net, true);
+  assert.equal(composePoint({ ...EMPTY_DRAFT, wing: 'bh', shot: 'volley' }, 'o', 'winner').oppNet, true);
+  const pass = composePoint({ ...EMPTY_DRAFT, wing: 'fh', shot: 'pass' }, 'o', 'winner');
+  assert.deepEqual([pass.point.net, pass.oppNet], [true, false]);
+  assert.equal(composePoint({ ...EMPTY_DRAFT, wing: 'fh', shot: 'overhead' }, 'p', 'winner').point.wing, null, 'an overhead has no forehand / backhand');
+  // Double fault in one tap from the first-serve screen; no detail kept.
+  r = composePoint({ ...d, netP: true }, 'p', 'doubleFault');
+  assert.deepEqual(r.point, { win: 'o', serve: 2, end: 'doubleFault', wing: null, shot: 'serve', rally: 'short', net: false, dir: null });
+  // Ace keeps the direction; a return keeps forehand / backhand and slice.
+  assert.deepEqual(composePoint(d, 'o', 'ace').point, { win: 'o', serve: 1, end: 'ace', wing: null, shot: 'serve', rally: 'short', net: false, dir: 'wide' });
+  const ret = composePoint(d, 'p', 'returnError').point;
+  assert.deepEqual([ret.win, ret.wing, ret.shot, ret.rally], ['o', 'bh', 'slice', 'short']);
+  assert.equal(composePoint({ ...d, shot: 'lob' }, 'p', 'returnWinner').point.shot, 'drive');
+  // Not seen: the row's player wins the point.
+  assert.equal(composePoint(EMPTY_DRAFT, 'o', 'other').point.win, 'o');
+  for (const end of ['ace', 'serviceWinner', 'doubleFault', 'returnWinner', 'returnError', 'winner', 'forcedError', 'unforcedError', 'other'] as const) {
+    assert.match(encodePoint(composePoint(d, 'p', end).point), POINT_RE, `${end} encodes`);
+  }
+});
+
+test('undo hands the point back to the point screen unchanged', () => {
+  const d = { ...EMPTY_DRAFT, serve: 2 as const, wing: 'fh' as const, shot: 'approach' as const, rally: 'mid' as const, dir: 't' as const, netP: true, netO: true };
+  const r = composePoint(d, 'p', 'winner');
+  assert.deepEqual(draftOf(r.point, r.oppNet), d);
+  assert.deepEqual(composePoint(draftOf(r.point, r.oppNet), 'p', 'winner'), r);
+});
+
+test('opponent at the net, returns in play, runs, tie-break points, one set at a time', () => {
+  // p serves game 1: ace, return error, return in play then winner, DF (no return), not seen.
+  const g1 = [
+    pt('p', { end: 'ace', shot: 'serve' }),
+    pt('p', { end: 'returnError', wing: 'fh', shot: 'drive' }),
+    pt('o', { serve: 2, end: 'winner', wing: 'bh', shot: 'volley', rally: 'mid' }), // opponent's volley winner off a 2nd serve
+    pt('o', { serve: 2, end: 'doubleFault', shot: 'serve' }),
+    pt('p', { end: 'other' }),
+    pt('p', { end: 'winner', wing: 'fh', shot: 'pass' }),
+  ];
+  const m = mkMatch(g1, BO3, 'p', { oppNet: [2, 5] });
+  const st = matchStats(m);
+  assert.deepEqual(st.net.o, { played: 2, won: 1 });
+  // Returns faced by the opponent: 1st serves with a known outcome = ace, return error, pass-winner rally → 1 in play of 3.
+  assert.deepEqual([st.o.returnIn1, st.o.returnFaced1], [1, 3]);
+  // 2nd serves: the volley-winner point (in play); the double fault is not a return.
+  assert.deepEqual([st.o.returnIn2, st.o.returnFaced2], [1, 1]);
+  assert.equal(st.p.maxPointRun, 2);
+  assert.equal(st.o.maxPointRun, 2);
+  assert.equal(st.p.maxGameRun, 1);
+  assert.equal(st.tbPoints, 0);
+
+  // A set won 6-0, a second set to a tie-break won 7-5 by the opponent.
+  const set1 = Array.from({ length: 6 }, () => game('p')).flat();
+  const set2 = [...Array.from({ length: 6 }, () => [...game('o'), ...game('p')]).flat(), ...pts('o', 5), ...pts('p', 5), ...pts('o', 2)];
+  const r = replay(mkMatch([...set1, ...set2]));
+  const all = statsFromReplay(r);
+  assert.equal(all.p.maxGameRun, 6);
+  assert.equal(all.p.maxPointRun, 24);
+  assert.equal(all.tbPoints, 12);
+  assert.equal(all.o.tbPointsWon, 7);
+  assert.equal(all.o.tiebreaksWon, 1);
+  const s1 = statsFromReplay(r, 0);
+  const s2 = statsFromReplay(r, 1);
+  assert.equal(s1.points, 24);
+  assert.equal(s1.points + s2.points, all.points);
+  assert.equal(s2.tbPoints, 12);
+  assert.equal(s1.tbPoints, 0);
+  assert.equal(s2.p.serviceGames + s2.o.serviceGames, 12, 'tie-break is not a service game');
+  assert.deepEqual(s2.setEnds, [s2.momentum.length - 1]);
+  // Several matches: counts add up, runs keep the best match.
+  const sum = sumStats([all, s1]);
+  assert.equal(sum.points, all.points + s1.points);
+  assert.equal(sum.p.maxPointRun, 24);
+  assert.equal(sum.net.o.played, 0);
 });
 
 test('a game: 15-30-40-game, then the other player serves', () => {
@@ -267,8 +360,8 @@ test('statistics: serve, return, winners and errors go to the right player', () 
   assert.equal(st.o.serviceGamesWon, 1);
   assert.equal(st.p.returnPoints, 5);
   assert.equal(st.p.returnWon, 1);
-  assert.equal(st.net.played, 1);
-  assert.equal(st.net.won, 1);
+  assert.deepEqual(st.net.p, { played: 1, won: 1 });
+  assert.deepEqual(st.net.o, { played: 0, won: 0 });
   assert.equal(st.strokes.p['fh:drive'].winners, 1);
   assert.equal(st.strokes.p['rfh:drive'].winners, 1, 'return winner kept apart from rally forehands');
   assert.equal(st.strokes.p['bh:drive'].unforced, 1);

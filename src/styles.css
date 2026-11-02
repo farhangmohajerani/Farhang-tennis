@@ -22,6 +22,9 @@
   --tp-bad: #a93d35;
   --tp-bad-soft: #f8e1de;
   --tp-star: #c79a2c;
+  /* Chart steps: the lighter partner of accent / muted, for the second segment of a stacked bar. */
+  --tp-accent-2: #7fb9c2;
+  --tp-muted-2: #9aa8b8;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -45,6 +48,8 @@
     --tp-bad: #ec8a80;
     --tp-bad-soft: #3a1714;
     --tp-star: #e5bd55;
+    --tp-accent-2: #3f8590;
+    --tp-muted-2: #5b6d84;
     color-scheme: dark;
   }
 }
@@ -68,6 +73,8 @@
   --tp-bad: #ec8a80;
   --tp-bad-soft: #3a1714;
   --tp-star: #e5bd55;
+  --tp-accent-2: #3f8590;
+  --tp-muted-2: #5b6d84;
   color-scheme: dark;
 }
 
@@ -91,6 +98,8 @@
   --color-bad: var(--tp-bad);
   --color-bad-soft: var(--tp-bad-soft);
   --color-star: var(--tp-star);
+  --color-accent-2: var(--tp-accent-2);
+  --color-muted-2: var(--tp-muted-2);
   --font-display: 'Instrument Serif', 'Vazirmatn', Georgia, 'Times New Roman', serif;
   --font-body: 'Manrope', 'Vazirmatn', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;

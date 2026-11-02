@@ -303,7 +303,12 @@ export class ArtifactDbAdapter implements StorageAdapter {
         continue;
       }
       const parsed = schema.safeParse(d.data());
-      if (!parsed.success) continue;
+      if (!parsed.success) {
+        // A document this version cannot read (e.g. written by a newer version) is left alone:
+        // forgetting it here means saving never deletes or overwrites it.
+        this.synced.delete(path);
+        continue;
+      }
       this.synced.set(path, JSON.stringify(parsed.data));
       out.push(parsed.data);
     }

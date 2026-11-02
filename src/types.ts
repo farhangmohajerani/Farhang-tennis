@@ -228,6 +228,7 @@ export type Rally = (typeof RALLY)[number];
  * E return error, W winner, F forced error, U unforced error, X other) · wing (f b, - none)
  * · shot (d drive, c slice, p drop, l lob, a approach, x pass, v volley, h half-volley, o overhead,
  * s serve, - none) · rally (s m l, -) · player at net (n, -) · serve direction (w wide, b body, t T, -).
+ * The opponent coming to the net is kept in the match's `oppNet` list.
  * Example: "p1Wfvmnt". Matches charted before November 2026 use the older 6-character code
  * (winner, serve, end, stroke f b v o d l s, rally, net), which is still read. See lib/match.ts.
  */
@@ -269,6 +270,11 @@ export const MatchSchema = z.object({
   /** live = charted point by point; score = final score only. */
   mode: z.enum(['live', 'score']),
   points: z.array(z.string().regex(POINT_RE)).default([]),
+  /**
+   * Indexes into `points` where the opponent came to the net. Kept beside the point codes (not in
+   * them) so the 8-character code stays readable by every installed version of the app.
+   */
+  oppNet: z.array(z.number().int().min(0)).default([]),
   /** Final set scores when mode is 'score'. */
   sets: z.array(SetScoreSchema).default([]),
   status: z.enum(['live', 'done']),

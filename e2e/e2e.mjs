@@ -346,7 +346,7 @@ async function run(engineName) {
   });
 
   let liveId = '';
-  await step('match tracker: serve, fault, double fault, winner, detail, undo, reload', async () => {
+  await step('match tracker: one screen per point — details then result, undo hands the point back, reload', async () => {
     await go('newmatch');
     await page.fill('#m-opponent', 'Test Opponent');
     await page.getByTestId('preset-oneSet').click();
@@ -355,65 +355,92 @@ async function run(engineName) {
     await page.getByTestId('scoreboard').waitFor();
     liveId = page.url().split('#match-')[1];
     const pts = async () => [await page.getByTestId('points-p').innerText(), await page.getByTestId('points-o').innerText()];
-    await page.getByTestId('ace').click();
+    const pressed = (id) => page.getByTestId(id).getAttribute('aria-pressed');
+    await page.getByTestId('p-ace').click();
     assert.deepEqual(await pts(), ['15', '0']);
-    await page.getByTestId('fault').click();
-    assert.match(await page.getByTestId('serve-status').innerText(), /2nd serve/);
-    await page.getByTestId('double-fault').click();
+    await page.getByTestId('serve-2').click();
+    assert.equal(await page.getByTestId('serve-2').getAttribute('aria-checked'), 'true');
+    await page.getByTestId('p-doubleFault').click();
     assert.deepEqual(await pts(), ['15', '15']);
-    await page.getByTestId('serve-in').click();
-        await page.getByTestId('p-winner-fh').click();
-    assert.deepEqual(await pts(), ['30', '15']);
-    assert.match(await page.getByTestId('court-side').innerText(), /Ad court/); // 4th point of the game
-    assert.match(await page.getByTestId('last-point').innerText(), /Winner · Forehand$/);
+    assert.equal(await page.getByTestId('serve-1').getAttribute('aria-checked'), 'true', 'each point starts on the first serve');
+    // Forehand, volley, rally length and serve direction on the same screen; the result tap saves the point.
+    await page.getByTestId('wing-fh').click();
     await page.getByTestId('type-volley').click();
-    assert.match(await page.getByTestId('last-point').innerText(), /Winner · Forehand · Volley/);
-    assert.equal(await page.getByTestId('net-toggle').getAttribute('aria-pressed'), 'true', 'a volley means the player was at the net');
-    await page.getByTestId('wing-bh').click();
-    assert.match(await page.getByTestId('last-point').innerText(), /Backhand · Volley/);
     await page.getByTestId('rally-mid').click();
     await page.getByTestId('dir-t').click();
-    assert.equal(await page.getByTestId('dir-t').getAttribute('aria-pressed'), 'true');
+    assert.match(await page.getByTestId('draft-summary').innerText(), /1st serve · T · Forehand · Volley · 5–8 shots/);
+    await page.getByTestId('p-winner').click();
+    assert.deepEqual(await pts(), ['30', '15']);
+    assert.match(await page.getByTestId('court-side').innerText(), /Ad court/); // 4th point of the game
+    assert.match(await page.getByTestId('last-point').innerText(), /Ela: Winner · Forehand · Volley$/);
+    assert.match(await page.getByTestId('last-point-extra').innerText(), /T · 5–8 shots · Ela at the net/, 'a volley puts the player at the net');
+    assert.equal(await pressed('wing-fh'), 'false', 'choices clear for the next point');
+    // Undo: the point comes back with its details; fix forehand → backhand and save again.
     await page.getByTestId('undo-point').click();
     assert.deepEqual(await pts(), ['15', '15']);
-    await page.getByTestId('serve-in').click();
-    await page.getByTestId('p-unforcedError-bh').click(); // opponent's unforced error
-    assert.deepEqual(await pts(), ['30', '15']);
+    assert.equal(await pressed('type-volley'), 'true');
+    assert.equal(await pressed('wing-fh'), 'true');
+    await page.getByTestId('wing-bh').click();
+    await page.getByTestId('p-winner').click();
+    assert.match(await page.getByTestId('last-point').innerText(), /Backhand · Volley/);
+    // The opponent's backhand unforced error: point to the player.
+    await page.getByTestId('wing-bh').click();
+    await page.getByTestId('net-o').click();
+    await page.getByTestId('o-unforcedError').click();
+    assert.deepEqual(await pts(), ['40', '15']);
+    assert.match(await page.getByTestId('last-point').innerText(), /Test: Unforced error · Backhand$/);
+    assert.match(await page.getByTestId('last-point-extra').innerText(), /Test at the net/);
     await page.reload();
     await page.getByTestId('scoreboard').waitFor();
-    assert.deepEqual(await pts(), ['30', '15']);
+    assert.deepEqual(await pts(), ['40', '15']);
   });
 
-  await step('match tracker: the set is won 4-0, the report shows score and statistics', async () => {
+  await step('match tracker: the set is won 4-0; report with Grand Slam statistics and four winners / errors charts', async () => {
     for (let i = 0; i < 40 && !(await page.getByTestId('final-score').count()); i++) {
-      await page.getByTestId('serve-in').click();
-      await page.getByTestId('p-winner-fh').click();
+      await page.getByTestId('p-winner').click();
     }
     await page.getByTestId('final-score').waitFor();
     assert.equal(await page.getByTestId('score-line').innerText(), '4-0');
     await page.getByTestId('stats-table').waitFor();
     const aces = await page.getByTestId('stats-table').getByRole('row').filter({ hasText: 'Aces' }).innerText();
     assert.match(aces, /^\s*1\b/);
+    for (const k of ['svc-pts', 'ret-in-1', 'ret-in-2', 'net', 'max-points', 'max-games']) await page.locator(`[data-stat="${k}"]`).waitFor();
+    assert.match(await page.locator('[data-stat="max-games"]').innerText(), /^\s*4\b/, 'four games in a row');
+    assert.match(await page.locator('[data-stat="net"]').innerText(), /Net points won\s+0%\s+0\/1/, 'the opponent lost her one net point');
     await page.getByTestId('momentum').waitFor();
     await page.getByTestId('detailed-analysis').waitFor();
-    const deuce = await page.getByTestId('serve-won-deuce').innerText();
-    const ad = await page.getByTestId('serve-won-ad').innerText();
-    assert.match(deuce, /\d+%/);
-    assert.match(ad, /\d+%/);
-    assert.match(await page.getByTestId('ret-err-bh').innerText(), /^\d+$/);
-    await page.getByTestId('who-o').click();
-    assert.equal(await page.getByTestId('who-o').getAttribute('aria-checked'), 'true');
-    await page.getByTestId('who-p').click();
+    for (const id of ['chart-winners-p', 'chart-winners-o', 'chart-errors-p', 'chart-errors-o']) await page.getByTestId(id).waitFor();
+    await page.getByTestId('chart-winners-p').locator('[data-bar="bh:volley"]').waitFor();
+    await page.getByTestId('chart-winners-p').locator('[data-bar="aces"]').waitFor();
+    assert.equal(await page.getByTestId('chart-errors-p').locator('[data-bar="df"] [data-value]').innerText(), '1');
+    assert.equal(await page.getByTestId('chart-errors-o').locator('[data-bar="bh:drive"] [data-value]').innerText(), '1');
+    assert.match(await page.getByTestId('chart-winners-o').innerText(), /No winners recorded/);
+    assert.match(await page.getByTestId('serve-won-p-deuce').innerText(), /\d+%/);
+    assert.match(await page.getByTestId('serve-won-p-ad').innerText(), /\d+%/);
+    await page.getByTestId('serve-won-o-deuce').waitFor();
+    assert.match(await page.getByTestId('net-p').innerText(), /100%/);
+    assert.equal(await page.getByTestId('set-filter').count(), 0, 'one set: no set filter');
     await page.getByTestId('reopen-match').click(); // undo the match-winning point
     await page.getByTestId('scoreboard').waitFor();
-    await page.getByTestId('serve-in').click();
-    await page.getByTestId('p-winner-fh').click();
+    await page.getByTestId('p-winner').click();
     await page.getByTestId('final-score').waitFor();
     await page.fill('#match-notes', 'Served well at 30-30.');
     await page.getByTestId('save-match-notes').click();
     await page.reload();
     await page.getByTestId('final-score').waitFor();
     assert.equal(await page.inputValue('#match-notes'), 'Served well at 30-30.');
+  });
+
+  await step('match report: statistics for each set', async () => {
+    await go('match-match-demo-1');
+    await page.getByTestId('set-filter').waitFor();
+    const total = async () => (await page.getByTestId('stats-table').getByRole('row').filter({ hasText: 'Total points won' }).innerText()).replace(/\s+/g, ' ');
+    const whole = await total();
+    await page.getByTestId('set-filter-0').click();
+    assert.equal(await page.getByTestId('set-filter-0').getAttribute('aria-checked'), 'true');
+    assert.notEqual(await total(), whole, 'set 1 only');
+    await page.getByTestId('set-filter-all').click();
+    assert.equal(await total(), whole);
   });
 
   await step('final score only: tie-break notation and the tournament result goal', async () => {
@@ -442,8 +469,7 @@ async function run(engineName) {
     await go('newmatch');
     await page.fill('#m-opponent', 'Retires');
     await page.getByTestId('match-submit').click();
-    await page.getByTestId('serve-in').click();
-    await page.getByTestId('p-winner-fh').click();
+    await page.getByTestId('p-winner').click();
     await page.getByTestId('finish-early').click();
     await page.getByTestId('reason-retired').check();
     await page.getByTestId('finish-winner-p').check();

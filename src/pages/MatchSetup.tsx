@@ -86,6 +86,7 @@ export function MatchForm({ initial, editing, onSubmit, onCancel }: { initial: M
       out.winner = winner;
       out.endReason = retired ? 'retired' : 'completed';
       out.points = [];
+      out.oppNet = [];
     }
     onSubmit(out);
   };
@@ -373,6 +374,7 @@ export function MatchSetup({ tournamentId }: { tournamentId: string }) {
     firstServer: 'p',
     mode: 'live',
     points: [],
+    oppNet: [],
     sets: [],
     status: 'live',
     endReason: 'completed',

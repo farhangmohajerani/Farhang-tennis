@@ -115,6 +115,66 @@ export function hitterOf(p: Point, server: Side): Side | null {
   }
 }
 
+/** What the coach picked on the point screen before tapping how the point ended (all optional). */
+export interface PointDraft {
+  serve: 1 | 2;
+  wing: Wing | null;
+  shot: ShotType | null;
+  rally: Rally | null;
+  dir: ServeDir | null;
+  /** Player / opponent came to the net. */
+  netP: boolean;
+  netO: boolean;
+}
+
+export const EMPTY_DRAFT: PointDraft = { serve: 1, wing: null, shot: null, rally: null, dir: null, netP: false, netO: false };
+
+/** Shots played at the net. */
+export const NET_SHOTS: readonly ShotType[] = ['volley', 'halfVolley', 'overhead'];
+
+/**
+ * One tap on how the point ended → one point. `actor` hit the point-ending shot (the server for
+ * aces, unreturned serves and double faults; the receiver for return winners and errors); for
+ * 'other' it is the player who won the point. A volley, half-volley or overhead puts its hitter at
+ * the net; a passing shot means the other player was at the net.
+ */
+export function composePoint(d: PointDraft, actor: Side, end: PointEnd): { point: Point; oppNet: boolean } {
+  const errorEnd = end === 'forcedError' || end === 'unforcedError' || end === 'returnError' || end === 'doubleFault';
+  const win = errorEnd ? other(actor) : actor;
+  const net = { p: d.netP, o: d.netO };
+  let point: Point;
+  switch (end) {
+    case 'doubleFault':
+      return { point: bare(win, 2, end, { shot: 'serve', rally: 'short' }), oppNet: false };
+    case 'ace':
+    case 'serviceWinner':
+      return { point: bare(win, d.serve, end, { shot: 'serve', rally: 'short', dir: d.dir }), oppNet: false };
+    case 'returnWinner':
+    case 'returnError':
+      point = bare(win, d.serve, end, { wing: d.wing, shot: d.shot === 'slice' ? 'slice' : d.wing || d.shot === 'drive' ? 'drive' : null, rally: 'short', dir: d.dir });
+      break;
+    case 'winner':
+    case 'forcedError':
+    case 'unforcedError': {
+      const shot = d.shot ?? (d.wing ? 'drive' : null);
+      if (shot && NET_SHOTS.includes(shot)) net[actor] = true;
+      if (shot === 'pass') net[other(actor)] = true;
+      point = bare(win, d.serve, end, { wing: shot === 'overhead' ? null : d.wing, shot, rally: d.rally, dir: d.dir });
+      break;
+    }
+    default:
+      point = bare(win, d.serve, 'other', { rally: d.rally, dir: d.dir });
+  }
+  point.net = net.p;
+  return { point, oppNet: net.o };
+}
+
+/** The point screen's choices for a recorded point (used to correct the last point after undo). */
+export function draftOf(p: Point, oppNet: boolean): PointDraft {
+  const onServeOrReturn = p.end === 'ace' || p.end === 'serviceWinner' || p.end === 'doubleFault' || p.end === 'returnWinner' || p.end === 'returnError';
+  return { serve: p.serve, wing: p.wing, shot: p.shot === 'serve' ? null : p.shot, rally: onServeOrReturn ? null : p.rally, dir: p.dir, netP: p.net, netO: oppNet };
+}
+
 /** Ending a point on a winning shot (vs an error). */
 export const isWinnerEnd = (e: PointEnd) => e === 'winner' || e === 'returnWinner' || e === 'ace' || e === 'serviceWinner';
 export const isErrorEnd = (e: PointEnd) => e === 'forcedError' || e === 'unforcedError' || e === 'returnError' || e === 'doubleFault';
@@ -258,6 +318,8 @@ export interface PointCtx {
   breakPoint: boolean;
   /** Court the point was served to; null for a no-ad deciding point (the receiver picks the side). */
   court: CourtSide | null;
+  /** The opponent came to the net (the player's net flag is in the point code). */
+  oppNet: boolean;
   gameWinner: Side | null;
   setWinner: Side | null;
 }
@@ -275,9 +337,10 @@ export interface Replay {
   ctx: PointCtx[];
 }
 
-export function replay(m: Pick<Match, 'format' | 'firstServer' | 'points'>): Replay {
+export function replay(m: Pick<Match, 'format' | 'firstServer' | 'points'> & { oppNet?: number[] }): Replay {
   const e = newEngine(m.format, m.firstServer);
   const points = m.points.map(decodePoint);
+  const oppNet = new Set(m.oppNet ?? []);
   const ctx: PointCtx[] = [];
   for (let i = 0; i < points.length && !e.winner; i++) {
     const cur = e.sets[e.sets.length - 1];
@@ -291,6 +354,7 @@ export function replay(m: Pick<Match, 'format' | 'firstServer' | 'points'>): Rep
       tiebreak: !!e.tb,
       breakPoint: isBreakPoint(e),
       court: courtOf(e),
+      oppNet: oppNet.has(i),
       gameWinner: null,
       setWinner: null,
     };
@@ -402,6 +466,12 @@ export interface SideStats {
   returnFirstWon: number;
   returnSecondPlayed: number;
   returnSecondWon: number;
+  /** Serves faced with a recorded outcome (not double faults, not "not seen"), against a 1st / 2nd serve. */
+  returnFaced1: number;
+  returnFaced2: number;
+  /** Of those, returns that landed in play (not an ace, unreturned serve or return error). */
+  returnIn1: number;
+  returnIn2: number;
   /** Winners in play, including return winners (aces and service winners are counted separately). */
   winners: number;
   returnWinners: number;
@@ -416,6 +486,12 @@ export interface SideStats {
   serviceGamesWon: number;
   returnGames: number;
   returnGamesWon: number;
+  /** Points won in tie-breaks (a match tie-break included), and tie-breaks won. */
+  tbPointsWon: number;
+  tiebreaksWon: number;
+  /** Most points / games won in a row (over several matches: the best single run). */
+  maxPointRun: number;
+  maxGameRun: number;
 }
 
 /** Serve and return by court side, for one player. */
@@ -446,10 +522,12 @@ export interface MatchStats {
   points: number;
   p: SideStats;
   o: SideStats;
-  /** Points where the charted player came to the net. */
-  net: { played: number; won: number };
+  /** Points where each player came to the net, and how many of them that player won. */
+  net: Record<Side, { played: number; won: number }>;
   /** Points by rally length, won by the charted player. */
   rally: Record<Rally, { played: number; won: number }>;
+  /** Tie-break points played. */
+  tbPoints: number;
   /** Serve and return per court side, for each player. */
   court: Record<Side, Record<CourtSide, CourtStats>>;
   /** Return winners and errors by forehand / backhand, for each player. */
@@ -458,19 +536,23 @@ export interface MatchStats {
   strokes: Record<Side, Record<string, StrokeRow>>;
   /** Serve direction per court side: points played and won by the server, for each player. */
   serveDir: Record<Side, Record<CourtSide, Record<ServeDir, { played: number; won: number }>>>;
-  /** Running (player points − opponent points) after each point; single matches only. */
+  /** Running (player points − opponent points) after each point counted. */
   momentum: number[];
-  /** Point indexes that ended a set; single matches only. */
+  /** Positions in `momentum` that ended a set. */
   setEnds: number[];
 }
 
+/** Counters that add up across matches. */
 const SIDE_KEYS: (keyof SideStats)[] = [
   'pointsWon', 'servicePoints', 'firstIn', 'firstWon', 'secondPlayed', 'secondWon', 'aces', 'doubleFaults', 'serviceWinners',
-  'returnPoints', 'returnWon', 'returnFirstPlayed', 'returnFirstWon', 'returnSecondPlayed', 'returnSecondWon', 'winners', 'returnWinners',
+  'returnPoints', 'returnWon', 'returnFirstPlayed', 'returnFirstWon', 'returnSecondPlayed', 'returnSecondWon',
+  'returnFaced1', 'returnFaced2', 'returnIn1', 'returnIn2', 'winners', 'returnWinners',
   'unforcedErrors', 'forcedErrors', 'returnErrors', 'bpFaced', 'bpSaved', 'bpChances', 'bpConverted', 'serviceGames', 'serviceGamesWon',
-  'returnGames', 'returnGamesWon',
+  'returnGames', 'returnGamesWon', 'tbPointsWon', 'tiebreaksWon',
 ];
-const emptySide = (): SideStats => Object.fromEntries(SIDE_KEYS.map((k) => [k, 0])) as unknown as SideStats;
+/** Records that take the best value across matches. */
+const RUN_KEYS: (keyof SideStats)[] = ['maxPointRun', 'maxGameRun'];
+const emptySide = (): SideStats => Object.fromEntries([...SIDE_KEYS, ...RUN_KEYS].map((k) => [k, 0])) as unknown as SideStats;
 
 const emptyCourt = (): CourtStats => ({ servePlayed: 0, serveWon: 0, firstIn: 0, aces: 0, doubleFaults: 0, returnPlayed: 0, returnWon: 0 });
 const perSide = <T,>(f: () => T): Record<Side, T> => ({ p: f(), o: f() });
@@ -484,8 +566,9 @@ export function emptyStats(): MatchStats {
     points: 0,
     p: emptySide(),
     o: emptySide(),
-    net: { played: 0, won: 0 },
+    net: perSide(() => ({ played: 0, won: 0 })),
     rally: Object.fromEntries(RALLY.map((r) => [r, { played: 0, won: 0 }])) as MatchStats['rally'],
+    tbPoints: 0,
     court: perSide(() => perCourt(emptyCourt)),
     returns: perSide(() => ({ fh: { winners: 0, errors: 0 }, bh: { winners: 0, errors: 0 }, unknown: { winners: 0, errors: 0 } })),
     strokes: perSide(() => ({}) as Record<string, StrokeRow>),
@@ -502,11 +585,14 @@ function addStroke(st: MatchStats, side: Side, row: Omit<StrokeRow, 'winners' | 
   map[key][kind] += n;
 }
 
-export function statsFromReplay(r: Replay): MatchStats {
+/** Statistics for a replayed match; pass a set index (0-based) for one set only. */
+export function statsFromReplay(r: Replay, set: number | null = null): MatchStats {
   const st = emptyStats();
-  st.matches = r.ctx.length ? 1 : 0;
   let diff = 0;
+  const run = { p: 0, o: 0 };
+  const gameRun = { p: 0, o: 0 };
   for (const c of r.ctx) {
+    if (set !== null && c.setIndex !== set) continue;
     const pt = c.point;
     const s = c.server;
     const rcv = other(s);
@@ -557,6 +643,17 @@ export function statsFromReplay(r: Replay): MatchStats {
       default:
         break;
     }
+    // Return in play: every serve faced with a known outcome; aces, unreturned serves and return errors are not in play.
+    if (pt.end !== 'doubleFault' && pt.end !== 'other') {
+      const inPlay = pt.end !== 'ace' && pt.end !== 'serviceWinner' && pt.end !== 'returnError';
+      if (pt.serve === 1) {
+        R.returnFaced1++;
+        if (inPlay) R.returnIn1++;
+      } else {
+        R.returnFaced2++;
+        if (inPlay) R.returnIn2++;
+      }
+    }
     if (c.breakPoint) {
       S.bpFaced++;
       R.bpChances++;
@@ -569,9 +666,18 @@ export function statsFromReplay(r: Replay): MatchStats {
       if (c.gameWinner === s) S.serviceGamesWon++;
       else R.returnGamesWon++;
     }
+    if (c.tiebreak) {
+      st.tbPoints++;
+      st[pt.win].tbPointsWon++;
+      if (c.setWinner) st[c.setWinner].tiebreaksWon++;
+    }
     if (pt.net) {
-      st.net.played++;
-      if (pt.win === 'p') st.net.won++;
+      st.net.p.played++;
+      if (pt.win === 'p') st.net.p.won++;
+    }
+    if (c.oppNet) {
+      st.net.o.played++;
+      if (pt.win === 'o') st.net.o.won++;
     }
     const rl = rallyOf(pt);
     if (rl) {
@@ -603,10 +709,20 @@ export function statsFromReplay(r: Replay): MatchStats {
       const h = hitterOf(pt, s);
       if (h) addStroke(st, h, { wing: pt.shot === 'overhead' ? null : pt.wing, shot: pt.shot, ret: false }, pt.end === 'winner' ? 'winners' : pt.end === 'forcedError' ? 'forced' : 'unforced');
     }
+    // Runs of points and games won in a row.
+    run[pt.win]++;
+    run[other(pt.win)] = 0;
+    st[pt.win].maxPointRun = Math.max(st[pt.win].maxPointRun, run[pt.win]);
+    if (c.gameWinner) {
+      gameRun[c.gameWinner]++;
+      gameRun[other(c.gameWinner)] = 0;
+      st[c.gameWinner].maxGameRun = Math.max(st[c.gameWinner].maxGameRun, gameRun[c.gameWinner]);
+    }
     diff += pt.win === 'p' ? 1 : -1;
     st.momentum.push(diff);
-    if (c.setWinner) st.setEnds.push(c.index);
+    if (c.setWinner) st.setEnds.push(st.momentum.length - 1);
   }
+  st.matches = st.points ? 1 : 0;
   return st;
 }
 
@@ -620,9 +736,13 @@ export function sumStats(list: MatchStats[]): MatchStats {
   for (const st of list) {
     out.matches += st.matches;
     out.points += st.points;
-    for (const side of ['p', 'o'] as const) for (const k of SIDE_KEYS) out[side][k] += st[side][k];
-    out.net.played += st.net.played;
-    out.net.won += st.net.won;
+    out.tbPoints += st.tbPoints;
+    for (const side of ['p', 'o'] as const) {
+      for (const k of SIDE_KEYS) out[side][k] += st[side][k];
+      for (const k of RUN_KEYS) out[side][k] = Math.max(out[side][k], st[side][k]);
+      out.net[side].played += st.net[side].played;
+      out.net[side].won += st.net[side].won;
+    }
     for (const r of RALLY) {
       out.rally[r].played += st.rally[r].played;
       out.rally[r].won += st.rally[r].won;
@@ -702,7 +822,7 @@ export function metricValue(metric: GoalMetric, st: MatchStats): number | null {
     case 'breakPointsConverted':
       return pctOf(P.bpConverted, P.bpChances);
     case 'netPointsWon':
-      return pctOf(st.net.won, st.net.played);
+      return pctOf(st.net.p.won, st.net.p.played);
     case 'shortRallyWon':
       return pctOf(st.rally.short.won, st.rally.short.played);
     case 'totalPointsWon':

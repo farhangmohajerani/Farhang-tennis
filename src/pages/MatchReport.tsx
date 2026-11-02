@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../lib/store';
 import { href, navigate } from '../lib/router';
-import { statsFromReplay, summary, type DisplaySet, type Side } from '../lib/match';
+import { setsText, statsFromReplay, summary, type DisplaySet, type Side } from '../lib/match';
 import type { Match, MatchFormat } from '../types';
 import { Badge, Button, Card, ConfirmButton, cx, Field, inputCls, PageHeader, SectionTitle } from '../components/ui';
 import { DetailedAnalysis, MomentumChart, names, ResultBadge, scoreLine, StatsTable, useCanEdit } from '../components/MatchBits';
@@ -53,7 +53,12 @@ export function MatchReport({ m }: { m: Match }) {
   const player = state.players.find((p) => p.id === m.playerId);
   const nm = names(m, player?.name ?? t('player'), t);
   const sum = useMemo(() => summary(m), [m]);
-  const st = useMemo(() => (sum.replay ? statsFromReplay(sum.replay) : null), [sum]);
+  /** Statistics for the whole match, or for one set (as Grand Slam match pages offer). */
+  const [setSel, setSetSel] = useState<number | null>(null);
+  const setIdxs = useMemo(() => [...new Set(sum.replay?.ctx.map((c) => c.setIndex) ?? [])], [sum]);
+  const sel = setSel !== null && setIdxs.includes(setSel) ? setSel : null;
+  const full = useMemo(() => (sum.replay ? statsFromReplay(sum.replay) : null), [sum]);
+  const st = useMemo(() => (sum.replay ? (sel === null ? full : statsFromReplay(sum.replay, sel)) : null), [sum, sel, full]);
   const tour = m.tournamentId ? state.tournaments.find((x) => x.id === m.tournamentId) : undefined;
   const [notes, setNotes] = useState(m.notes);
   const [editing, setEditing] = useState(false);
@@ -74,7 +79,8 @@ export function MatchReport({ m }: { m: Match }) {
                 onClick={() => {
                   // A completed match reopens one point back so the result can be corrected.
                   const points = finishedByScore ? m.points.slice(0, -1) : m.points;
-                  dispatch({ type: 'saveMatch', match: { ...m, points, status: 'live', winner: null, endReason: 'completed' } });
+                  const oppNet = m.oppNet.filter((i) => i < points.length);
+                  dispatch({ type: 'saveMatch', match: { ...m, points, oppNet, status: 'live', winner: null, endReason: 'completed' } });
                   toast(finishedByScore ? t('pointUndone') : t('chartingResumed'));
                 }}
               >
@@ -99,6 +105,25 @@ export function MatchReport({ m }: { m: Match }) {
         )}
       </div>
 
+      {setIdxs.length > 1 && (
+        <div role="radiogroup" aria-label={t('statsFor')} className="mb-4 flex flex-wrap items-center gap-1.5" data-testid="set-filter">
+          <span className="me-1 text-[13px] font-semibold text-muted">{t('statsFor')}</span>
+          {[null, ...setIdxs].map((i) => (
+            <button
+              key={i ?? 'all'}
+              type="button"
+              role="radio"
+              aria-checked={sel === i}
+              onClick={() => setSetSel(i)}
+              data-testid={`set-filter-${i ?? 'all'}`}
+              className={cx('min-h-9 rounded-full border px-3 text-[13px] font-semibold', sel === i ? 'border-band bg-band text-band-ink' : 'border-line bg-surface')}
+            >
+              {i === null ? t('wholeMatch') : `${t('setN', { n: i + 1 })}${sum.sets[i] ? ` · ${setsText([sum.sets[i]])}` : ''}`}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-5">
           <FinalScore sets={sum.sets} nm={nm} winner={sum.winner} />
@@ -112,7 +137,7 @@ export function MatchReport({ m }: { m: Match }) {
           )}
         </div>
         <div className="flex min-w-0 flex-col gap-5">
-          {st && st.points > 0 && <MomentumChart st={st} name={nm.p} />}
+          {full && full.points > 0 && <MomentumChart st={full} name={nm.p} />}
           <Card className="p-4">
             <Field label={t('matchNotes')} htmlFor="match-notes">
               {canEdit ? (
