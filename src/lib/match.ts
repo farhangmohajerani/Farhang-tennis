@@ -129,14 +129,22 @@ export interface PointDraft {
 
 export const EMPTY_DRAFT: PointDraft = { serve: 1, wing: null, shot: null, rally: null, dir: null, netP: false, netO: false };
 
-/** Shots played at the net. */
-export const NET_SHOTS: readonly ShotType[] = ['volley', 'halfVolley', 'overhead'];
+/** Shots that put their hitter at the net (an approach shot is hit coming in). */
+export const NET_SHOTS: readonly ShotType[] = ['volley', 'halfVolley', 'overhead', 'approach'];
+
+/** Who must have been at the net, given the point-ending rally shot and its hitter. */
+export function netImplied(hitter: Side, shot: ShotType | null): Record<Side, boolean> {
+  const r = { p: false, o: false };
+  if (shot && NET_SHOTS.includes(shot)) r[hitter] = true;
+  if (shot === 'pass') r[other(hitter)] = true;
+  return r;
+}
 
 /**
  * One tap on how the point ended → one point. `actor` hit the point-ending shot (the server for
  * aces, unreturned serves and double faults; the receiver for return winners and errors); for
- * 'other' it is the player who won the point. A volley, half-volley or overhead puts its hitter at
- * the net; a passing shot means the other player was at the net.
+ * 'other' it is the player who won the point. A volley, half-volley, overhead or approach puts its
+ * hitter at the net; a passing shot means the other player was at the net.
  */
 export function composePoint(d: PointDraft, actor: Side, end: PointEnd): { point: Point; oppNet: boolean } {
   const errorEnd = end === 'forcedError' || end === 'unforcedError' || end === 'returnError' || end === 'doubleFault';
@@ -157,8 +165,9 @@ export function composePoint(d: PointDraft, actor: Side, end: PointEnd): { point
     case 'forcedError':
     case 'unforcedError': {
       const shot = d.shot ?? (d.wing ? 'drive' : null);
-      if (shot && NET_SHOTS.includes(shot)) net[actor] = true;
-      if (shot === 'pass') net[other(actor)] = true;
+      const implied = netImplied(actor, shot);
+      net.p ||= implied.p;
+      net.o ||= implied.o;
       point = bare(win, d.serve, end, { wing: shot === 'overhead' ? null : d.wing, shot, rally: d.rally, dir: d.dir });
       break;
     }

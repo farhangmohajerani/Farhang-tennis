@@ -2,7 +2,7 @@ import type { AppState, Log, Match, MatchFormat, Plan, Session, Tournament } fro
 import { SEED_DRILLS } from './drills';
 import { LEVEL_THRESHOLDS } from './drills/factory';
 import { addDays, generateDates } from '../lib/schedule';
-import { applyPoint, bare, encodePoint, hitterOf, NET_SHOTS, newEngine, other, serverOf, type Point, type Side } from '../lib/match';
+import { applyPoint, bare, encodePoint, hitterOf, netImplied, newEngine, other, serverOf, type Point, type Side } from '../lib/match';
 
 export const DEMO_IDS = {
   coach: 'person-coach-demo',
@@ -70,9 +70,9 @@ function demoPoints(format: MatchFormat, firstServer: Side, seed: number): { poi
     while (!e.winner && points.length < 400) {
       const server = serverOf(e);
       const pt = simulatePoint(r, server);
-      // The opponent was at the net when her last shot was a volley or overhead, or the player passed her.
+      // The opponent was at the net when her last shot was a volley, overhead or approach, or the player passed her.
       const hitter = hitterOf(pt, server);
-      if ((hitter === 'o' && pt.shot && NET_SHOTS.includes(pt.shot)) || (hitter === 'p' && pt.shot === 'pass')) oppNet.push(points.length);
+      if (hitter && netImplied(hitter, pt.shot).o) oppNet.push(points.length);
       applyPoint(e, pt.win);
       points.push(encodePoint(pt));
     }

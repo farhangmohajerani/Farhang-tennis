@@ -28,6 +28,7 @@ import { evaluateGoal, evaluateTournament, furthestRound, makeTournament } from 
 import { createDemoState } from '../src/data/demo';
 import { MatchSchema, POINT_RE, type Log, type Match, type MatchFormat } from '../src/types';
 import { hitterOf } from '../src/lib/match';
+import { RALLY_STROKES, RETURN_STROKES, screenPoint, seedOf } from '../src/lib/pointEntry';
 
 const BO3: MatchFormat = { sets: 3, games: 6, finalSet: 'full', noAd: false };
 const JUNIOR: MatchFormat = { sets: 3, games: 6, finalSet: 'mtb', noAd: false };
@@ -140,6 +141,7 @@ test('one tap saves the point: the row is the player who hit the last shot', () 
   const pass = composePoint({ ...EMPTY_DRAFT, wing: 'fh', shot: 'pass' }, 'o', 'winner');
   assert.deepEqual([pass.point.net, pass.oppNet], [true, false]);
   assert.equal(composePoint({ ...EMPTY_DRAFT, wing: 'fh', shot: 'overhead' }, 'p', 'winner').point.wing, null, 'an overhead has no forehand / backhand');
+  assert.equal(composePoint({ ...EMPTY_DRAFT, wing: 'fh', shot: 'approach' }, 'o', 'unforcedError').oppNet, true, 'an approach shot is hit coming to the net');
   // Double fault in one tap from the first-serve screen; no detail kept.
   r = composePoint({ ...d, netP: true }, 'p', 'doubleFault');
   assert.deepEqual(r.point, { win: 'o', serve: 2, end: 'doubleFault', wing: null, shot: 'serve', rally: 'short', net: false, dir: null });
@@ -160,6 +162,42 @@ test('undo hands the point back to the point screen unchanged', () => {
   const r = composePoint(d, 'p', 'winner');
   assert.deepEqual(draftOf(r.point, r.oppNet), d);
   assert.deepEqual(composePoint(draftOf(r.point, r.oppNet), 'p', 'winner'), r);
+});
+
+test('point screen: every stroke button and result saves the right point, and undo puts it back', () => {
+  const options = [EMPTY_DRAFT, { ...EMPTY_DRAFT, serve: 2 as const, rally: 'long' as const, dir: 'body' as const, netO: true }];
+  let n = 0;
+  for (const d of options) {
+    for (const actor of ['p', 'o'] as const) {
+      for (const stroke of RALLY_STROKES) {
+        for (const end of ['winner', 'forcedError', 'unforcedError'] as const) {
+          const r = screenPoint({ ...d, wing: stroke.wing ? null : 'bh' }, actor, end, stroke);
+          assert.equal(hitterOf(r.point, 'p'), actor, `${actor} ${stroke.key} ${end}: row = hitter`);
+          assert.equal(r.point.shot, stroke.shot);
+          assert.equal(r.point.wing, stroke.shot === 'overhead' ? null : stroke.wing ?? 'bh');
+          const back = seedOf(r.point, r.oppNet);
+          assert.deepEqual(back.pick, { zone: actor, key: stroke.key });
+          const again = screenPoint(back.draft, actor, end, RALLY_STROKES.find((x) => x.key === back.pick!.key));
+          assert.deepEqual(again, r, `${actor} ${stroke.key} ${end}: undo round trip`);
+          n++;
+        }
+      }
+      for (const stroke of RETURN_STROKES) {
+        for (const end of ['returnWinner', 'returnError'] as const) {
+          const r = screenPoint(d, actor, end, stroke);
+          assert.deepEqual([r.point.wing, r.point.shot, r.point.rally], [stroke.wing, stroke.shot, 'short']);
+          const back = seedOf(r.point, r.oppNet);
+          assert.deepEqual(back.pick, { zone: 'return', key: stroke.key });
+          assert.deepEqual(screenPoint(back.draft, actor, end, stroke), r);
+        }
+      }
+    }
+  }
+  assert.equal(n, 2 * 2 * RALLY_STROKES.length * 3);
+  // Serve endings and "not seen" keep no stroke.
+  const ace = screenPoint({ ...EMPTY_DRAFT, dir: 't' }, 'o', 'ace');
+  assert.deepEqual(seedOf(ace.point, false), { draft: { ...EMPTY_DRAFT, dir: 't', rally: null }, pick: null });
+  assert.equal(screenPoint({ ...EMPTY_DRAFT, wing: 'fh' }, 'p', 'other').point.wing, null);
 });
 
 test('opponent at the net, returns in play, runs, tie-break points, one set at a time', () => {

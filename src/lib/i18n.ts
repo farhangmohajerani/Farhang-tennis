@@ -612,11 +612,7 @@ const en = {
   wingShort_bh: "BH",
   faultSecondServe: "Fault · 2nd serve",
   serveNumber: "Serve",
-  lastShot: "Last shot",
   atNetShort: "{name} at the net",
-  thisPoint: "This point",
-  clearChoices: "Clear",
-  howEndedHelp: "Tap how the point ended — that saves the point. Each row is the player who hit the last shot. Green: point {p} · red: point {o}.",
   serveBy: "Serve · {name}",
   returnBy: "Return · {name}",
   notSeen: "Not seen",
@@ -650,6 +646,12 @@ const en = {
   netNone: "No net points recorded",
   statsFor: "Statistics for",
   wholeMatch: "Whole match",
+  strokeCombo: "{wing} {shot}",
+  resultsTitle: "{name} · {stroke} — how did the point end?",
+  composerHelp: "Stroke, then result — that saves the point. Tap Fault for a 2nd serve. Green: point {p} · red: point {o}.",
+  returnStrokeHelp: "Point ended on the return? Tap the stroke",
+  rallyWho: "Rally — who hit the last shot?",
+  rallyStrokeHelp: "Tap the stroke, then the result",
 };
 
 export type DictKey = keyof typeof en;
@@ -1264,11 +1266,7 @@ const fa: Partial<Record<DictKey, string>> = {
   wingShort_bh: "بک‌هند",
   faultSecondServe: "فالت · سرویس دوم",
   serveNumber: "سرویس",
-  lastShot: "ضربه‌ی آخر",
   atNetShort: "{name} پشت تور",
-  thisPoint: "این امتیاز",
-  clearChoices: "پاک کردن",
-  howEndedHelp: "روی نحوه‌ی تمام شدن امتیاز بزنید؛ با همین لمس ذخیره می‌شود. هر ردیف مال بازیکنی است که ضربه‌ی آخر را زد. سبز: امتیاز {p} · قرمز: امتیاز {o}.",
   serveBy: "سرویس · {name}",
   returnBy: "ریترن · {name}",
   notSeen: "ندیدم",
@@ -1302,6 +1300,12 @@ const fa: Partial<Record<DictKey, string>> = {
   netNone: "امتیاز پشت تور ثبت نشده",
   statsFor: "آمار برای",
   wholeMatch: "کل مسابقه",
+  strokeCombo: "{shot} {wing}",
+  resultsTitle: "{name} · {stroke} — امتیاز چطور تمام شد؟",
+  composerHelp: "ضربه، بعد نتیجه — با همان لمس ذخیره می‌شود. برای سرویس دوم «فالت» را بزنید. سبز: امتیاز {p} · قرمز: امتیاز {o}.",
+  returnStrokeHelp: "امتیاز روی ریترن تمام شد؟ ضربه را بزنید",
+  rallyWho: "رالی — ضربه‌ی آخر را چه کسی زد؟",
+  rallyStrokeHelp: "ضربه را بزنید، بعد نتیجه را",
 };
 
 const CAT: Record<Lang, Record<Category, string>> = {
