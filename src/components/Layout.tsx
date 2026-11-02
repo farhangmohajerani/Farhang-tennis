@@ -34,6 +34,7 @@ export function Layout({ route, children }: { route: string; children: ReactNode
   const [connectOpen, setConnectOpen] = useState(false);
   const [coachOpen, setCoachOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [changingPw, setChangingPw] = useState(false);
   const rank: Record<Role, number> = { parent: 0, coach: 1, admin: 2 };
   const roles = ROLES.filter((r) => !adapter.maxRole || rank[r] <= rank[adapter.maxRole]);
   const canManage = role !== 'parent' && adapter.canWrite !== false;
@@ -156,6 +157,7 @@ export function Layout({ route, children }: { route: string; children: ReactNode
       {connectOpen && <ConnectParentModal onClose={() => setConnectOpen(false)} />}
       {coachOpen && <ConnectCoachModal onClose={() => setCoachOpen(false)} />}
       {deleting && <DeleteAccountModal onClose={() => setDeleting(false)} />}
+      {changingPw && <ChangePasswordModal onClose={() => setChangingPw(false)} />}
 
       <main className="gutter mx-auto w-full max-w-6xl flex-1 pb-28 md:pb-12">{children}</main>
 
@@ -173,6 +175,9 @@ export function Layout({ route, children }: { route: string; children: ReactNode
               · {t('signedInAs', { email: getTeam()!.myEmail })}
               <button type="button" className="font-semibold text-accent" onClick={() => getTeam()!.signOut()} data-testid="sign-out">
                 {t('signOutBtn')}
+              </button>
+              <button type="button" className="font-semibold text-accent" onClick={() => setChangingPw(true)} data-testid="change-password">
+                {t('changePassword')}
               </button>
               <button type="button" className="font-semibold text-bad" onClick={() => setDeleting(true)} data-testid="delete-account">
                 {t('deleteAccount')}
@@ -223,6 +228,66 @@ export function Layout({ route, children }: { route: string; children: ReactNode
       )}
       <Toasts />
     </div>
+  );
+}
+
+/** A strong-enough password: 10+ characters, a letter and a digit, not one repeated or running sequence. */
+export function passwordOk(pw: string): boolean {
+  if (pw.length < 10 || !/[\p{L}]/u.test(pw) || !/\d/.test(pw)) return false;
+  const lower = pw.toLowerCase();
+  if (/^(.)\1+$/.test(lower)) return false;
+  const runs = ['0123456789', 'abcdefghijklmnopqrstuvwxyz', 'qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+  return !runs.some((r) => r.includes(lower) || (r + r).includes(lower));
+}
+
+function ChangePasswordModal({ onClose }: { onClose: () => void }) {
+  const { t, toast } = useStore();
+  const [pw, setPw] = useState('');
+  const [again, setAgain] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const ok = passwordOk(pw);
+  const same = pw === again;
+  return (
+    <Modal open onClose={onClose} title={t('changePasswordTitle')}>
+      <form
+        className="flex flex-col gap-3"
+        data-testid="change-password-form"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!ok || !same) return;
+          setBusy(true);
+          setErr('');
+          try {
+            await getTeam()!.changePassword(pw);
+            toast(t('passwordChanged'));
+            onClose();
+          } catch (x) {
+            setErr(x instanceof Error ? x.message : String(x));
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <label className="flex flex-col gap-1 text-[13px] font-semibold">
+          {t('newPassword')}
+          <input type="password" autoComplete="new-password" className={inputCls} value={pw} onChange={(e) => setPw(e.target.value)} data-testid="new-password" />
+        </label>
+        <label className="flex flex-col gap-1 text-[13px] font-semibold">
+          {t('repeatPassword')}
+          <input type="password" autoComplete="new-password" className={inputCls} value={again} onChange={(e) => setAgain(e.target.value)} data-testid="new-password-again" />
+        </label>
+        <p className={cx('text-[12px]', pw && !ok ? 'font-semibold text-bad' : 'text-muted')}>{t('passwordRule')}</p>
+        {again && !same && <p className="text-[12px] font-semibold text-bad">{t('passwordsDiffer')}</p>}
+        {err && <p className="text-sm text-bad" role="alert">{err}</p>}
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>{t('cancel')}</Button>
+          <Button type="submit" variant="primary" disabled={busy || !ok || !same} data-testid="save-password">
+            {t('save')}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

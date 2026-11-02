@@ -11,19 +11,27 @@ create table if not exists public.subscriptions (
   updated_at timestamptz not null default now()
 );
 alter table public.subscriptions enable row level security;
-drop policy if exists subs_read on public.subscriptions;
-drop policy if exists subs_admin_insert on public.subscriptions;
-drop policy if exists subs_admin_update on public.subscriptions;
-drop policy if exists subs_admin_delete on public.subscriptions;
-create policy subs_read on public.subscriptions for select to authenticated
-  using (user_id = (select auth.uid()) or (select public.my_role()) = 'admin');
-create policy subs_admin_insert on public.subscriptions for insert to authenticated
-  with check ((select public.my_role()) = 'admin' and source = 'manual');
-create policy subs_admin_update on public.subscriptions for update to authenticated
-  using ((select public.my_role()) = 'admin' and source = 'manual')
-  with check ((select public.my_role()) = 'admin' and source = 'manual');
-create policy subs_admin_delete on public.subscriptions for delete to authenticated
-  using ((select public.my_role()) = 'admin' and source = 'manual');
+-- Created only when missing, so running this file again changes nothing.
+do $$
+begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'subscriptions' and policyname = 'subs_read') then
+    create policy subs_read on public.subscriptions for select to authenticated
+      using (user_id = (select auth.uid()) or (select public.my_role()) = 'admin');
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'subscriptions' and policyname = 'subs_admin_insert') then
+    create policy subs_admin_insert on public.subscriptions for insert to authenticated
+      with check ((select public.my_role()) = 'admin' and source = 'manual');
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'subscriptions' and policyname = 'subs_admin_update') then
+    create policy subs_admin_update on public.subscriptions for update to authenticated
+      using ((select public.my_role()) = 'admin' and source = 'manual')
+      with check ((select public.my_role()) = 'admin' and source = 'manual');
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'subscriptions' and policyname = 'subs_admin_delete') then
+    create policy subs_admin_delete on public.subscriptions for delete to authenticated
+      using ((select public.my_role()) = 'admin' and source = 'manual');
+  end if;
+end $$;
 
 -- Delete the signed-in account (App Store rule 5.1.1(v)). Removes the person's family copies and
 -- their link to players; the academy keeps its own training records. The last admin cannot leave.

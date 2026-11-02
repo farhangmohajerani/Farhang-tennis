@@ -19,14 +19,33 @@ export function TeamPanel() {
   const invite = async (role: 'admin' | 'coach') => {
     setBusy(true);
     try {
-      await team.invite(email.trim().toLowerCase(), role);
-      toast(t('invited', { email: email.trim() }));
+      const { code } = await team.invite(email.trim().toLowerCase(), role);
+      toast(t('invitedWithCode', { email: email.trim(), code }));
       setEmail('');
       load();
     } catch (e) {
       toast(e instanceof Error ? e.message : String(e), 'error');
     } finally {
       setBusy(false);
+    }
+  };
+  /** The invite as a message: the share sheet where there is one, otherwise copied. */
+  const sendInvite = async (m: TeamMember) => {
+    const text = t('coachInviteText', { email: m.email, code: m.code ?? '', url: `${window.location.origin}${window.location.pathname}` });
+    const nav = navigator as Navigator & { share?: (d: ShareData) => Promise<void> };
+    try {
+      if (nav.share) {
+        await nav.share({ text });
+        return;
+      }
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(t('inviteCopied'));
+    } catch {
+      toast(t('inviteCopyFailed'), 'warn');
     }
   };
   return (
@@ -39,6 +58,16 @@ export function TeamPanel() {
             <span className="min-w-0 flex-1 truncate">{m.email}</span>
             <Badge tone={m.role === 'admin' ? 'band' : 'accent'}>{t(m.role === 'admin' ? 'role_admin' : 'role_coach')}</Badge>
             {m.pending && !m.requested && <Badge tone="warn">{t('pendingInvite')}</Badge>}
+            {m.pending && !m.requested && m.code && (
+              <span className="inline-flex items-center gap-2">
+                <span className="num rounded-lg bg-sunken px-2 py-0.5 font-mono text-[15px] font-semibold tracking-[0.2em]" dir="ltr" data-testid={`invite-code-${m.email}`}>
+                  {m.code}
+                </span>
+                <Button size="sm" onClick={() => void sendInvite(m)} data-testid={`send-invite-${m.email}`}>
+                  {t('sendInvite')}
+                </Button>
+              </span>
+            )}
             {m.requested && (
               <>
                 <Badge tone="warn">{t('wantsAccess')}</Badge>

@@ -57,10 +57,12 @@ const T = fa
       expired: 'این لینک منقضی شده یا قبلاً استفاده شده. دوباره «رمز را فراموش کرده‌ام» را بزنید یا وارد شوید.',
       tooMany: 'تعداد درخواست‌ها زیاد بود. چند دقیقه صبر کنید و دوباره امتحان کنید.', passwordSaved: 'رمز ذخیره شد.',
       tabSignIn: 'ورود', tabSignUp: 'ساخت حساب', whoAreYou: 'شما کدام هستید؟', coach: 'مربی', parent: 'والدین / خانواده',
-      coachHint: 'مدیر آکادمی باید دسترسی شما را تأیید کند.', parentHint: 'بعد از ثبت‌نام یک کد ۶ رقمی می‌گیرید که به مربی می‌دهید.',
+      coachHint: 'با همان ایمیلی که دعوت شده‌اید ثبت‌نام کنید؛ بعد کد دعوت ۶ رقمی را وارد می‌کنید. کد ندارید؟ مدیر آکادمی دسترسی‌تان را تأیید می‌کند.', parentHint: 'بعد از ثبت‌نام، کدی را که مربی داده وارد می‌کنید (یا کد خودتان را به مربی می‌دهید).',
       pickType: 'اول انتخاب کنید مربی هستید یا والدین.',
       pwHint: 'رمز عبور حداقل ۸ کاراکتر',
-      pendingTitle: 'درخواست شما فرستاده شد', pendingText: 'حساب مربی شما ساخته شد. مدیر آکادمی باید دسترسی‌تان را تأیید کند. بعد از تأیید، همین صفحه را دوباره باز کنید.',
+      pendingTitle: 'کد ندارید؟ درخواست شما فرستاده شد', pendingText: 'مدیر آکادمی درخواست شما را می‌بیند و تأیید می‌کند. بعد از تأیید، «دوباره بررسی کن» را بزنید.',
+      codeTitle: 'کد دعوت مربی', codeHelp: 'کد ۶ رقمی‌ای را که مدیر آکادمی برایتان فرستاده بنویسید (با همان ایمیلی که دعوت شده بود ثبت‌نام کرده باشید).', codeSubmit: 'ورود',
+      codeInvalid: 'این کد درست نیست یا برای این ایمیل نیست. کد و ایمیل را با مدیر چک کنید.', codeTooMany: 'کدهای اشتباه زیاد شد. یک ساعت دیگر دوباره امتحان کنید.', codeFailed: 'اتصال برقرار نشد. اینترنت را چک کنید و دوباره امتحان کنید.',
       checkAgain: 'دوباره بررسی کن', signOut: 'خروج', deleted: 'حساب شما حذف شد.',
     }
   : {
@@ -75,10 +77,12 @@ const T = fa
       expired: 'This link has expired or was already used. Tap “Forgot password” again, or sign in.',
       tooMany: 'Too many attempts. Wait a few minutes and try again.', passwordSaved: 'Password saved.',
       tabSignIn: 'Sign in', tabSignUp: 'Create account', whoAreYou: 'Who are you?', coach: 'Coach', parent: 'Parent / family',
-      coachHint: 'The academy admin approves coach access.', parentHint: 'After signing up you get a 6-digit code to give to your coach.',
+      coachHint: 'Sign up with the email you were invited with, then type your 6-digit invite code. No code? The academy admin approves your access.', parentHint: 'After signing up, type the code your coach gave you (or give the coach your own code).',
       pickType: 'First choose whether you are a coach or a parent.',
       pwHint: 'Password: at least 8 characters',
-      pendingTitle: 'Request sent', pendingText: 'Your coach account is created. The academy admin needs to approve your access. Open this page again once approved.',
+      pendingTitle: 'No code? Your request is sent', pendingText: 'The academy admin sees your request and approves it. Once approved, tap “Check again”.',
+      codeTitle: 'Coach invite code', codeHelp: 'Type the 6-digit code the academy admin sent you (you must have signed up with the invited email).', codeSubmit: 'Enter',
+      codeInvalid: 'This code is not right, or it is not for this email. Check the code and the email with the admin.', codeTooMany: 'Too many wrong codes. Try again in an hour.', codeFailed: 'Could not connect. Check the internet and try again.',
       checkAgain: 'Check again', signOut: 'Sign out', deleted: 'Your account has been deleted.',
     };
 
@@ -235,10 +239,55 @@ function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: Su
   );
 }
 
-function PendingCoach({ email, onSignOut }: { email: string; onSignOut: () => void }) {
+function PendingCoach({ email, onSignOut, claim }: { email: string; onSignOut: () => void; claim: (code: string) => Promise<{ role?: string; error?: string }> }) {
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const submit = async () => {
+    setBusy(true);
+    setMsg('');
+    try {
+      const r = await claim(code.trim());
+      if (r?.role) return window.location.reload();
+      setMsg(r?.error === 'too_many_attempts' ? T.codeTooMany : T.codeInvalid);
+    } catch (e) {
+      void e;
+      setMsg(T.codeFailed);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div className="gutter mx-auto flex min-h-[100dvh] max-w-sm flex-col justify-center gap-4" dir={fa ? 'rtl' : 'ltr'} data-testid="pending-coach">
       <h1 className="font-display text-4xl">{T.title}</h1>
+      <form
+        className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+        data-testid="staff-code-form"
+      >
+        <h2 className="font-display text-2xl">{T.codeTitle}</h2>
+        <p className="text-sm text-muted">{T.codeHelp}</p>
+        <div className="flex gap-2">
+          <input
+            id="staff-code"
+            inputMode="numeric"
+            autoComplete="off"
+            dir="ltr"
+            placeholder="······"
+            aria-label={T.codeTitle}
+            className="h-12 min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 text-center font-mono text-2xl tracking-[0.3em]"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          />
+          <button type="submit" disabled={busy || code.length !== 6} className="h-12 rounded-full bg-accent px-5 font-semibold text-accent-ink disabled:opacity-40" data-testid="staff-code-submit">
+            {busy ? '…' : T.codeSubmit}
+          </button>
+        </div>
+        {msg && <p className="text-sm font-semibold text-bad" role="alert" data-testid="staff-code-msg">{msg}</p>}
+      </form>
       <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-5">
         <h2 className="font-display text-2xl">{T.pendingTitle}</h2>
         <p>{T.pendingText}</p>
@@ -255,7 +304,13 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth) {
   const user = await supabaseUser(db, auth);
   if (user.pendingCoach) {
     db.stop();
-    root.render(<PendingCoach email={user.email} onSignOut={() => { auth.signOut(); window.location.reload(); }} />);
+    root.render(
+      <PendingCoach
+        email={user.email}
+        onSignOut={() => { auth.signOut(); window.location.reload(); }}
+        claim={(code) => db.rpc<{ role?: string; error?: string }>('claim_staff_code', { p_code: code })}
+      />,
+    );
     return;
   }
   setPairing(rpcPairing((fn, args) => db.rpc(fn, args), () => void db.poll()));
@@ -314,7 +369,7 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth) {
     },
     async list() {
       const staff = (await (await rest('staff?select=user_id,email,role&order=email')).json()) as { user_id: string; email: string; role: 'admin' | 'coach' }[];
-      const invites = user.role === 'admin' ? ((await (await rest('staff_invites?select=email,role&order=email')).json()) as { email: string; role: 'admin' | 'coach' }[]) : [];
+      const invites = user.role === 'admin' ? ((await (await rest('staff_invites?select=email,role,code&used_at=is.null&order=email')).json()) as { email: string; role: 'admin' | 'coach'; code: string }[]) : [];
       let requests: { user_id: string; email: string }[] = [];
       if (user.role === 'admin') {
         try {
@@ -330,7 +385,11 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth) {
       ];
     },
     async invite(email, role) {
-      await rest('staff_invites?on_conflict=email', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ email, role }) });
+      const r = await db.rpc<{ code: string }>('staff_invite', { p_email: email, p_role: role });
+      return { code: r.code };
+    },
+    async changePassword(password) {
+      await auth.updatePassword(password);
     },
     async approve(m) {
       await db.rpc('approve_coach', { p_user: m.userId, p_role: 'coach' });

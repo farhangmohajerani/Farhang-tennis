@@ -10,7 +10,7 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
   const users = new Map(); // email -> {id, email, password}
   const tokens = new Map(); // token -> user
   const staff = new Map(); // user_id -> {user_id, email, role}
-  const invites = new Map([[ownerEmail, { email: ownerEmail, role: 'admin' }]]);
+  const invites = new Map([[ownerEmail, { email: ownerEmail, role: 'admin', code: '111111', used_at: null }]]);
   const docs = new Map(); // path -> {path, data, updated_at}
   const codes = new Map(); // user_id -> code
   const requests = new Map(); // user_id -> {user_id, email}
@@ -75,12 +75,36 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
     if (p.startsWith('/rest/v1/rpc/')) {
       const fn = p.split('/').pop();
       if (fn === 'claim_staff') {
+        // Only a new academy's first admin claims by email (supabase/staff-codes.sql); coaches need their code.
         const inv = invites.get(u.email);
-        if (inv) {
-          staff.set(u.id, { user_id: u.id, email: u.email, role: inv.role });
-          invites.delete(u.email);
+        const hasAdmin = [...staff.values()].some((x) => x.role === 'admin');
+        if (inv && !inv.used_at && inv.role === 'admin' && !hasAdmin) {
+          staff.set(u.id, { user_id: u.id, email: u.email, role: 'admin' });
+          inv.used_at = stamp();
         }
         return send(200, role(u));
+      }
+      if (fn === 'staff_invite') {
+        if (role(u) !== 'admin') return send(400, { message: 'not_admin' });
+        const email = String(json.p_email ?? '').trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !['admin', 'coach'].includes(json.p_role ?? 'coach')) return send(400, { message: 'bad_invite' });
+        let code;
+        do code = String(100000 + Math.floor(Math.random() * 900000));
+        while ([...invites.values()].some((x) => x.code === code));
+        invites.set(email, { email, role: json.p_role ?? 'coach', code, used_at: null });
+        return send(200, { email, role: json.p_role ?? 'coach', code });
+      }
+      if (fn === 'claim_staff_code') {
+        if (role(u)) return send(200, { role: role(u) });
+        if ((attempts.get(u.id) ?? 0) >= 10) return send(200, { error: 'too_many_attempts' });
+        const inv = invites.get(u.email);
+        if (!inv || inv.used_at || inv.code !== String(json.p_code ?? '').trim()) {
+          attempts.set(u.id, (attempts.get(u.id) ?? 0) + 1);
+          return send(200, { error: 'invalid_code' });
+        }
+        staff.set(u.id, { user_id: u.id, email: u.email, role: inv.role });
+        inv.used_at = stamp();
+        return send(200, { role: inv.role });
       }
       if (fn === 'request_coach') {
         if (!role(u)) requests.set(u.id, { user_id: u.id, email: u.email });
@@ -252,7 +276,7 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
     }
     if (p === '/rest/v1/staff_invites') {
       if (role(u) !== 'admin') return req.method === 'GET' ? send(200, []) : send(403, { message: 'row-level security' });
-      if (req.method === 'GET') return send(200, [...invites.values()]);
+      if (req.method === 'GET') return send(200, [...invites.values()].filter((x) => !x.used_at).map(({ email, role: r, code }) => ({ email, role: r, code })));
       if (req.method === 'POST') {
         invites.set(json.email, json);
         return send(201);

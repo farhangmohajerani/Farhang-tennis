@@ -58,12 +58,36 @@ await step('owner adds a player and invites a coach', async () => {
   await owner.fill('#invite-email', 'coach@example.com');
   await owner.getByTestId('invite-coach').click();
   await owner.getByTestId('team-list').getByText('coach@example.com').waitFor();
+  await owner.getByText(/Invited coach@example.com — code \d{6}/).waitFor();
+  await owner.waitForFunction(() => /^\d{6}$/.test(document.querySelector('[data-testid="invite-code-coach@example.com"]')?.textContent?.trim() ?? ''));
+  globalThis.coachCode = (await owner.getByTestId('invite-code-coach@example.com').innerText()).trim();
+  assert.equal(globalThis.coachCode, mock.invites.get('coach@example.com').code);
 });
 const coach = await person();
-await step('invited coach signs up with that email and sees the player', async () => {
-  await signUp(coach, 'coach@example.com', 'coach');
+await step('invited coach signs up with that email, types the invite code and sees the player', async () => {
+  await signUpRaw(coach, 'coach@example.com', 'coach');
+  await coach.getByTestId('pending-coach').waitFor();
+  assert.equal(mock.staff.size, 1, 'the email alone gives no access');
+  await coach.locator('#staff-code').fill('000000');
+  await coach.getByTestId('staff-code-submit').click();
+  await coach.getByTestId('staff-code-msg').getByText(/not right/).waitFor();
+  await coach.locator('#staff-code').fill(globalThis.coachCode);
+  await coach.getByTestId('staff-code-submit').click();
   await coach.getByText('Alya').first().waitFor();
   assert.equal(await coach.locator('#role-select option').count(), 2);
+  assert.ok(mock.invites.get('coach@example.com').used_at, 'the invite is used up');
+});
+await step('someone who signs up with an invited email but has no code gets no access', async () => {
+  await owner.fill('#invite-email', 'coach3@example.com');
+  await owner.getByTestId('invite-coach').click();
+  await owner.getByTestId('invite-code-coach3@example.com').waitFor();
+  const squatter = await person();
+  await signUpRaw(squatter, 'coach3@example.com', 'coach');
+  await squatter.getByTestId('pending-coach').waitFor();
+  await squatter.reload();
+  await squatter.getByTestId('pending-coach').waitFor();
+  assert.ok(![...mock.staff.values()].some((x) => x.email === 'coach3@example.com'), 'not staff');
+  await squatter.close();
 });
 await step('coach builds a plan; owner sees it after the next poll', async () => {
   await coach.goto(URL_ + '#planner');
@@ -283,6 +307,31 @@ await step('a parent deletes the account inside the app', async () => {
   const alya = [...mock.docs.values()].find((d) => d.path.startsWith('academy/data/players/') && d.data.name === 'Alya');
   assert.ok(!alya.data.parentIds.includes(id), 'link to the player removed');
   assert.ok(alya.data.parentIds.includes(mock.users.get('parent2@example.com').id), 'the other parent stays linked');
+});
+await step('a coach changes the password; the new one works, the old one does not', async () => {
+  await coach.goto(URL_ + '#dashboard');
+  await coach.fill('#sb-email', 'coach@example.com');
+  await coach.fill('#sb-password', 'password123');
+  await coach.getByTestId('sign-in').click();
+  await coach.getByText('Alya').first().waitFor();
+  await coach.getByTestId('change-password').click();
+  await coach.getByTestId('new-password').fill('12345678');
+  await coach.getByText(/At least 10 characters/).waitFor();
+  assert.equal(await coach.getByTestId('save-password').isDisabled(), true, 'a weak password is refused');
+  await coach.getByTestId('new-password').fill('Grass-court-77');
+  await coach.getByTestId('new-password-again').fill('Grass-court-78');
+  assert.equal(await coach.getByTestId('save-password').isDisabled(), true, 'they must match');
+  await coach.getByTestId('new-password-again').fill('Grass-court-77');
+  await coach.getByTestId('save-password').click();
+  await coach.getByText('Password changed').waitFor();
+  const again = await person();
+  await again.fill('#sb-email', 'coach@example.com');
+  await again.fill('#sb-password', 'password123');
+  await again.getByTestId('sign-in').click();
+  await again.getByTestId('auth-message').getByText(/Wrong email or password/).waitFor();
+  await again.fill('#sb-password', 'Grass-court-77');
+  await again.getByTestId('sign-in').click();
+  await again.getByText('Alya').first().waitFor();
 });
 console.log(`\n${passed} passed`);
 await browser.close();
