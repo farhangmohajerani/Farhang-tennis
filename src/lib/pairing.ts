@@ -2,7 +2,15 @@
  * Connecting a parent to a child. Two implementations:
  *  - claude.ai: the parent's open page shows a code in `room` presence; the platform vouches for the sender id.
  *  - Supabase: the database issues the parent a 6-digit code (my_pair_code) and resolves it for staff only.
+ *    The other direction too (supabase/invites.sql): the coach makes a code for a player and the parent
+ *    types it under "Connect coach".
  */
+export interface Invite {
+  code: string;
+  expiresAt: string;
+}
+export type RedeemResult = { playerId: string; name: string } | { error: string };
+
 export interface Pairing {
   /** The current viewer's code (parents). null = unavailable here. */
   myCode(): Promise<string | null>;
@@ -12,7 +20,14 @@ export interface Pairing {
   names(ids: string[]): Promise<Record<string, string>>;
   /** True when the code only works while the parent's page is open. */
   needsOpenPage: boolean;
+  /** Staff (Supabase only): the code for one player that a parent types under "Connect coach". */
+  invite?(playerId: string, fresh?: boolean): Promise<Invite>;
+  /** Parents (Supabase only): follow the player behind a coach's code. */
+  redeem?(code: string): Promise<RedeemResult>;
 }
+
+/** The database is missing a function (its SQL file has not been run yet). */
+export const isMissingFunction = (e: unknown) => /PGRST202|Could not find the function/i.test(e instanceof Error ? e.message : String(e));
 
 let current: Pairing | null = null;
 export const setPairing = (p: Pairing) => {
@@ -71,11 +86,18 @@ export function roomPairing(): Pairing | null {
   };
 }
 
-export function rpcPairing(rpc: <T>(fn: string, args?: Record<string, unknown>) => Promise<T>): Pairing {
+export function rpcPairing(rpc: <T>(fn: string, args?: Record<string, unknown>) => Promise<T>, refresh?: () => void): Pairing {
   return {
     needsOpenPage: false,
     myCode: () => rpc<string | null>('my_pair_code'),
     resolve: (code) => rpc<string | null>('resolve_pair_code', { p_code: code }),
+    invite: (playerId, fresh = false) => rpc<Invite>('player_invite', { p_player: playerId, p_fresh: fresh }),
+    async redeem(code) {
+      const r = await rpc<RedeemResult>('redeem_player_invite', { p_code: code });
+      // The child's copy exists now: fetch it instead of waiting for the next poll.
+      if (r && 'playerId' in r) refresh?.();
+      return r ?? { error: 'invalid_code' };
+    },
     async names(ids) {
       const rows = await rpc<{ id: string; email: string }[]>('user_emails', { p_ids: ids });
       return Object.fromEntries(rows.map((r) => [r.id, r.email]));

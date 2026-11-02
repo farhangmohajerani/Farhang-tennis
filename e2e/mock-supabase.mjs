@@ -15,6 +15,8 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
   const codes = new Map(); // user_id -> code
   const requests = new Map(); // user_id -> {user_id, email}
   const subs = new Map(); // user_id -> {user_id, plan, expires_at, source}
+  const playerInvites = new Map(); // player_id -> {code, created_at}
+  const attempts = new Map(); // user_id -> number of wrong codes (no expiry in the mock)
   let clock = 0;
   const stamp = () => new Date(Date.UTC(2026, 0, 1) + ++clock * 1000).toISOString();
 
@@ -117,6 +119,51 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
         for (const [t, x] of tokens) if (x.id === u.id) tokens.delete(t);
         return send(204);
       }
+      if (fn === 'player_invite') {
+        if (!role(u)) return send(400, { message: 'not_staff' });
+        if (!docs.has(`academy/data/players/${json.p_player}`)) return send(400, { message: 'no_player' });
+        let inv = playerInvites.get(json.p_player);
+        if (!inv || json.p_fresh) {
+          let code;
+          do code = String(100000 + Math.floor(Math.random() * 900000));
+          while ([...playerInvites.values()].some((x) => x.code === code));
+          inv = { code, created_at: Date.now() };
+          playerInvites.set(json.p_player, inv);
+        }
+        return send(200, { code: inv.code, expiresAt: new Date(inv.created_at + 7 * 86400000).toISOString() });
+      }
+      if (fn === 'redeem_player_invite') {
+        if (role(u)) return send(200, { error: 'staff_account' });
+        if ((attempts.get(u.id) ?? 0) >= 10) return send(200, { error: 'too_many_attempts' });
+        const hit = [...playerInvites.entries()].find(([, x]) => x.code === String(json.p_code).trim());
+        const pdoc = hit && docs.get(`academy/data/players/${hit[0]}`);
+        if (!pdoc) {
+          attempts.set(u.id, (attempts.get(u.id) ?? 0) + 1);
+          return send(200, { error: 'invalid_code' });
+        }
+        const pid = hit[0];
+        const ids = Array.isArray(pdoc.data.parentIds) ? pdoc.data.parentIds : [];
+        if (!ids.includes(u.id)) {
+          pdoc.data = { ...pdoc.data, parentIds: [...ids, u.id] };
+          pdoc.updated_at = stamp();
+        }
+        const of = (coll) => [...docs.values()].filter((d) => d.path.startsWith(`academy/data/${coll}/`) && d.data.playerId === pid).map((d) => d.data);
+        const fpath = `family/${u.id}/players/${pid}`;
+        if (!docs.has(fpath)) {
+          const data = {
+            player: { ...pdoc.data, parentIds: [] },
+            plans: of('plans').filter((x) => x.owner === 'coach' || x.sharedWithCoachId),
+            logs: of('logs'),
+            tournaments: of('tournaments'),
+            matches: of('matches'),
+            drills: [],
+            paywall: docs.get('academy/config')?.data?.paywall === true,
+            access: {},
+          };
+          docs.set(fpath, { path: fpath, parent: parentOf(fpath), data, updated_at: stamp() });
+        }
+        return send(200, { playerId: pid, name: pdoc.data.name });
+      }
       if (fn === 'user_emails') {
         if (!role(u)) return send(200, []);
         return send(200, [...users.values()].filter((x) => json.p_ids.includes(x.id)).map((x) => ({ id: x.id, email: x.email })));
@@ -196,5 +243,5 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
     send(404, { message: 'not found ' + p });
   });
   const linkFor = (email) => issue(users.get(email));
-  return new Promise((r) => server.listen(port, () => r({ server, docs, staff, invites, subs, users, linkFor })));
+  return new Promise((r) => server.listen(port, () => r({ server, docs, staff, invites, subs, users, linkFor, playerInvites })));
 }

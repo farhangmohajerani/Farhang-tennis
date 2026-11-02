@@ -6,7 +6,8 @@ import { roleKey, type DictKey } from '../lib/i18n';
 import { activePlayer } from '../lib/reducer';
 import { Button, cx, Icon, inputCls, Modal, Toasts } from './ui';
 import { PlayersModal } from './Players';
-import { ConnectParentModal } from './ParentLink';
+import { ConnectCoachModal, ConnectParentModal } from './ParentLink';
+import { getPairing } from '../lib/pairing';
 import { currentBuild, reloadTo, useNewVersion } from '../lib/update';
 import { getTeam } from '../lib/team';
 
@@ -31,11 +32,14 @@ export function Layout({ route, children }: { route: string; children: ReactNode
   const activeName = route === 'drill' ? 'library' : ['tournaments', 'match', 'newmatch', 'tournament'].includes(route) ? 'matches' : route;
   const [playersOpen, setPlayersOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
+  const [coachOpen, setCoachOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const rank: Record<Role, number> = { parent: 0, coach: 1, admin: 2 };
   const roles = ROLES.filter((r) => !adapter.maxRole || rank[r] <= rank[adapter.maxRole]);
   const canManage = role !== 'parent' && adapter.canWrite !== false;
   const shared = adapter.kind === 'artifact';
+  // A signed-in parent (not a coach previewing the parent view) can add a child with the coach's code.
+  const canConnectCoach = shared && adapter.maxRole === 'parent' && !!getPairing()?.redeem;
   const newVersion = useNewVersion();
   const build = currentBuild();
 
@@ -131,6 +135,17 @@ export function Layout({ route, children }: { route: string; children: ReactNode
                 {t('connectParentBtn')}
               </button>
             )}
+            {canConnectCoach && (
+              <button
+                type="button"
+                className="inline-flex h-8 items-center gap-1 rounded-full bg-accent px-3 text-[13px] font-semibold text-accent-ink hover:brightness-110"
+                onClick={() => setCoachOpen(true)}
+                data-testid="open-connect-coach"
+              >
+                <span aria-hidden="true">🔗</span>
+                {t('connectCoachBtn')}
+              </button>
+            )}
             <span className={cx('ms-auto rounded-full px-2 py-0.5 text-[11px] font-bold', shared ? 'bg-good-soft text-good' : 'bg-warn-soft text-warn')} title={adapter.label}>
               {shared ? t('sharedBadge') : adapter.kind === 'supabase' ? 'Supabase' : t('demoBanner')}
             </span>
@@ -139,6 +154,7 @@ export function Layout({ route, children }: { route: string; children: ReactNode
       )}
       {playersOpen && <PlayersModal open={playersOpen} onClose={() => setPlayersOpen(false)} />}
       {connectOpen && <ConnectParentModal onClose={() => setConnectOpen(false)} />}
+      {coachOpen && <ConnectCoachModal onClose={() => setCoachOpen(false)} />}
       {deleting && <DeleteAccountModal onClose={() => setDeleting(false)} />}
 
       <main className="gutter mx-auto w-full max-w-6xl flex-1 pb-28 md:pb-12">{children}</main>

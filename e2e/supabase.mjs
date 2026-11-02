@@ -103,7 +103,7 @@ await step('coach connects the parent from the top-bar button (parent page need 
   assert.ok([...mock.docs.keys()].some((k) => k.startsWith('family/')));
   await coach.keyboard.press('Escape');
   await coach.getByTestId('manage-players').click();
-  await coach.locator('[data-testid^="parents-"]').first().getByText(/Connect parent · 1/).waitFor();
+  await coach.locator('[data-testid^="parents-"]').first().getByText(/Connect parents · 1/).waitFor();
   await coach.keyboard.press('Escape');
 });
 await step('parent signs in again and follows Alya read-only', async () => {
@@ -116,6 +116,55 @@ await step('parent signs in again and follows Alya read-only', async () => {
   assert.ok(!nav.includes('Planner'));
   await p2.goto(URL_ + '#parent');
   await p2.getByTestId('parent-calendar').waitFor();
+});
+let inviteCode;
+await step('coach makes a code for Alya under "Code for parent"', async () => {
+  await coach.goto(URL_ + '#dashboard');
+  await coach.getByTestId('open-connect-parent').click();
+  await coach.getByTestId('tab-invite').click();
+  await coach.waitForFunction(() => /^\d{6}$/.test(document.querySelector('[data-testid="invite-code"]')?.textContent?.trim() ?? ''));
+  inviteCode = (await coach.getByTestId('invite-code').innerText()).trim();
+  await coach.getByText(/Valid until/).waitFor();
+  // Same code when opened again; "New code" (two taps) replaces it.
+  await coach.keyboard.press('Escape');
+  await coach.getByTestId('open-connect-parent').click();
+  await coach.getByTestId('tab-invite').click();
+  await coach.getByTestId('invite-code').getByText(inviteCode).waitFor();
+  await coach.getByRole('button', { name: 'New code' }).click();
+  await coach.getByRole('button', { name: /Old code stops working/ }).click();
+  await coach.waitForFunction((old) => { const c = document.querySelector('[data-testid="invite-code"]')?.textContent?.trim() ?? ''; return /^\d{6}$/.test(c) && c !== old; }, inviteCode);
+  const old = inviteCode;
+  inviteCode = (await coach.getByTestId('invite-code').innerText()).trim();
+  assert.notEqual(inviteCode, old);
+  await coach.keyboard.press('Escape');
+  globalThis.__oldInvite = old;
+});
+const parent2 = await person();
+await step('a new parent types the coach\'s code under "Connect coach" and follows Alya at once', async () => {
+  await signUp(parent2, 'parent2@example.com');
+  await parent2.getByTestId('coach-code-form').waitFor();
+  await parent2.locator('#coach-code').fill(globalThis.__oldInvite);
+  await parent2.getByTestId('coach-code-submit').click();
+  await parent2.getByTestId('coach-code-msg').getByText(/not valid or has expired/).waitFor();
+  await parent2.locator('#coach-code').fill(inviteCode);
+  await parent2.getByTestId('coach-code-submit').click();
+  await parent2.getByText('Connected to Alya').first().waitFor();
+  await parent2.getByText('Alya').first().waitFor();
+  await parent2.getByTestId('parent-connect').waitFor({ state: 'detached', timeout: 10000 });
+  const p2 = mock.users.get('parent2@example.com');
+  const pdoc = [...mock.docs.values()].find((d) => d.path.startsWith('academy/data/players/') && d.data.name === 'Alya');
+  assert.ok(pdoc.data.parentIds.includes(p2.id));
+  assert.ok(mock.docs.has(`family/${p2.id}/players/${pdoc.data.id}`));
+});
+await step('the coach sees the new parent; the parent has "Connect coach" in the top bar', async () => {
+  await coach.getByTestId('open-connect-parent').click();
+  await coach.getByTestId('connect-parent-modal').getByText('parent2@example.com').waitFor({ timeout: 15000 });
+  await coach.keyboard.press('Escape');
+  await parent2.getByTestId('open-connect-coach').click();
+  await parent2.getByTestId('connect-coach-modal').waitFor();
+  await parent2.waitForFunction(() => /^\d{6}$/.test(document.querySelector('[data-testid="my-pair-code"]')?.textContent?.trim() ?? ''));
+  await parent2.keyboard.press('Escape');
+  assert.equal(await coach.getByTestId('open-connect-coach').count(), 0);
 });
 await step('reload keeps the coach signed in with data', async () => {
   await coach.reload();
@@ -232,7 +281,8 @@ await step('a parent deletes the account inside the app', async () => {
   assert.equal(mock.users.has('parent@example.com'), false);
   assert.equal([...mock.docs.keys()].some((k) => k.startsWith(`family/${id}/`)), false, 'family copies removed');
   const alya = [...mock.docs.values()].find((d) => d.path.startsWith('academy/data/players/') && d.data.name === 'Alya');
-  assert.deepEqual(alya.data.parentIds, [], 'link to the player removed');
+  assert.ok(!alya.data.parentIds.includes(id), 'link to the player removed');
+  assert.ok(alya.data.parentIds.includes(mock.users.get('parent2@example.com').id), 'the other parent stays linked');
 });
 console.log(`\n${passed} passed`);
 await browser.close();

@@ -258,7 +258,7 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth) {
     root.render(<PendingCoach email={user.email} onSignOut={() => { auth.signOut(); window.location.reload(); }} />);
     return;
   }
-  setPairing(rpcPairing((fn, args) => db.rpc(fn, args)));
+  setPairing(rpcPairing((fn, args) => db.rpc(fn, args), () => void db.poll()));
   const rest = async (path: string, init: RequestInit = {}) => {
     const s = await auth.refresh();
     const res = await fetch(`${cfg.url}/rest/v1/${path}`, {
