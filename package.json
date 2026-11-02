@@ -11,7 +11,7 @@
     "preview": "node scripts/serve.mjs",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts && tsx scripts/quality.ts",
-    "test:e2e": "npm run build:single && node e2e/e2e.mjs all && node e2e/shared.mjs"
+    "test:e2e": "npm run build:single && node e2e/e2e.mjs all && node e2e/shared.mjs && node e2e/update.mjs"
   },
   "dependencies": {
     "react": "^19.2.0",

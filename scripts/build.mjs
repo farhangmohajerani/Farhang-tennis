@@ -12,6 +12,7 @@ import * as esbuild from 'esbuild';
 import { compile } from 'tailwindcss';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -89,6 +90,24 @@ async function writeStatic() {
   fs.copyFileSync(path.join(root, 'index.html'), path.join(out, 'index.html'));
 }
 
+/**
+ * Cache-busting: GitHub Pages lets browsers keep app.js / app.css for 10 minutes, so after a deploy
+ * an iPad could keep running the old app. index.html now names them app.js?v=<content hash>; a new
+ * deploy changes the URL, and the app itself notices a newer index.html (src/lib/update.ts).
+ */
+function stampIndex() {
+  const h = crypto.createHash('sha256');
+  h.update(fs.readFileSync(path.join(out, 'app.js')));
+  h.update(fs.readFileSync(path.join(out, 'app.css')));
+  const v = h.digest('hex').slice(0, 10);
+  const file = path.join(out, 'index.html');
+  const html = fs.readFileSync(file, 'utf8');
+  const next = html.replace('src="./app.js"', `src="./app.js?v=${v}"`).replace('href="./app.css"', `href="./app.css?v=${v}"`);
+  if (!next.includes(`app.js?v=${v}`) || !next.includes(`app.css?v=${v}`)) throw new Error('index.html: could not stamp app.js / app.css');
+  fs.writeFileSync(file, next);
+  return v;
+}
+
 function writeSingle() {
   const js = fs.readFileSync(path.join(out, 'app.js'), 'utf8').replace(/<\/script/gi, '<\\/script');
   const css = fs.readFileSync(path.join(out, 'app.css'), 'utf8').replace(/<\/style/gi, '<\\/style');
@@ -121,9 +140,10 @@ if (args.has('--serve')) {
   const t0 = Date.now();
   await writeStatic();
   await esbuild.build(jsOptions);
+  const stamp = stampIndex();
   const jsKB = (fs.statSync(path.join(out, 'app.js')).size / 1024).toFixed(0);
   const cssKB = (fs.statSync(path.join(out, 'app.css')).size / 1024).toFixed(0);
-  let msg = `Built dist/ in ${Date.now() - t0} ms — app.js ${jsKB} KB, app.css ${cssKB} KB`;
+  let msg = `Built dist/ in ${Date.now() - t0} ms — app.js ${jsKB} KB, app.css ${cssKB} KB, build ${stamp}`;
   if (args.has('--single')) msg += `, tennis-progress.html ${(writeSingle() / 1024).toFixed(0)} KB`;
   console.log(msg);
 }

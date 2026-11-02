@@ -1,3 +1,5 @@
 node_modules
 dist
 .env
+e2e/.sb-build
+e2e/.upd-build

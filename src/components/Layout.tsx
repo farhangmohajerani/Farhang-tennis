@@ -7,6 +7,7 @@ import { activePlayer } from '../lib/reducer';
 import { Button, cx, Icon, inputCls, Modal, Toasts } from './ui';
 import { PlayersModal } from './Players';
 import { ConnectParentModal } from './ParentLink';
+import { currentBuild, reloadTo, useNewVersion } from '../lib/update';
 import { getTeam } from '../lib/team';
 
 export const NAV: { name: string; key: DictKey; roles: Role[] }[] = [
@@ -35,6 +36,8 @@ export function Layout({ route, children }: { route: string; children: ReactNode
   const roles = ROLES.filter((r) => !adapter.maxRole || rank[r] <= rank[adapter.maxRole]);
   const canManage = role !== 'parent' && adapter.canWrite !== false;
   const shared = adapter.kind === 'artifact';
+  const newVersion = useNewVersion();
+  const build = currentBuild();
 
   return (
     <div className="flex min-h-[100dvh] flex-col">
@@ -160,7 +163,12 @@ export function Layout({ route, children }: { route: string; children: ReactNode
               </button>
             </span>
           )}
-</p>
+          {build && (
+            <span className="ms-2 whitespace-nowrap font-mono" data-testid="build-id" dir="ltr">
+              · {t('buildLabel')} {build.slice(0, 6)}
+            </span>
+          )}
+        </p>
       </footer>
 
       <nav
@@ -183,6 +191,20 @@ export function Layout({ route, children }: { route: string; children: ReactNode
           ))}
         </ul>
       </nav>
+      {newVersion && (
+        <div className="fixed inset-x-0 z-40 flex justify-center px-4" style={{ bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))' }}>
+          <button
+            type="button"
+            onClick={() => reloadTo(newVersion)}
+            className="inline-flex items-center gap-2 rounded-full bg-band px-4 py-2.5 text-sm font-semibold text-band-ink shadow-lg"
+            data-testid="update-banner"
+          >
+            <span aria-hidden="true">↻</span>
+            {t('updateReady')}
+            <span className="text-accent">{t('updateNow')}</span>
+          </button>
+        </div>
+      )}
       <Toasts />
     </div>
   );
