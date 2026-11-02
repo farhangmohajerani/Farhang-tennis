@@ -10,14 +10,14 @@ import { PlayerForm } from '../components/Players';
 import { ParentConnect } from '../components/ParentLink';
 import { CoachRequestsBanner } from '../components/TeamPanel';
 import { daysBetween, matchesOfPlayer } from '../lib/competition';
-import { ResultBadge, scoreLine } from '../components/MatchBits';
+import { ResultBadge, scoreLine, useCanChart } from '../components/MatchBits';
 
 function MatchesCard({ playerId }: { playerId: string }) {
   const { state, t, lang } = useStore();
   const all = matchesOfPlayer(state, playerId);
   const live = all.filter((m) => m.status === 'live');
   const last = [...all].reverse().find((m) => m.status === 'done');
-  const isCoach = state.settings.role !== 'parent';
+  const canChart = useCanChart();
   return (
     <Card className="p-5">
       <SectionTitle aside={<a href={href('matches')} className="text-sm font-semibold text-accent">{t('nav_matches')} →</a>}>{t('matchesCard')}</SectionTitle>
@@ -39,7 +39,7 @@ function MatchesCard({ playerId }: { playerId: string }) {
         ) : (
           !live.length && <p className="text-sm text-muted">{t('noMatches')}</p>
         )}
-        {isCoach && (
+        {canChart && (
           <a href={href('newmatch')} className="mt-1 inline-flex h-9 items-center self-start rounded-full border border-line px-3.5 text-sm font-semibold hover:border-accent">
             + {t('newMatch')}
           </a>

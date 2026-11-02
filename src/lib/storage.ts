@@ -17,6 +17,10 @@ export interface StorageAdapter {
   subscribe?(apply: (fn: (s: AppState) => AppState) => void): void;
   /** Look for other people's changes more often while a live score is being followed. */
   setFastSync?(on: boolean): void;
+  /** This viewer's user id in shared mode (who is charting a match). */
+  myId?: string | null;
+  /** A parent who may chart the live score of their own child's matches (Supabase). */
+  readonly canChart?: boolean;
   /** Human-readable description shown in the UI so demo storage is never mistaken for production. */
   readonly label: string;
   load(): Promise<AppState | null>;

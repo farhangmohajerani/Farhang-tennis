@@ -7,9 +7,9 @@ import { todayISO } from '../lib/schedule';
 import { uid } from '../lib/id';
 import { chartedStats, daysBetween, evaluateTournament, makeTournament, matchesOfPlayer, phaseOf } from '../lib/competition';
 import { METRIC_META, metricValue, summary } from '../lib/match';
-import { SURFACES, type GoalMetric, type Tournament } from '../types';
+import { SURFACES, type GoalMetric, type Match, type Tournament } from '../types';
 import { Badge, Button, Card, cx, Empty, Field, Icon, inputCls, PageHeader, SectionTitle } from '../components/ui';
-import { MatchRow, roundLabel, scoreLine, surfaceLabel, useCanEdit } from '../components/MatchBits';
+import { MatchRow, roundLabel, scoreLine, surfaceLabel, useCanChart, useCanEdit, useMatchRights } from '../components/MatchBits';
 import { Seg } from './MatchSetup';
 import { fmtMetric, metricLabel } from './TournamentDetail';
 
@@ -99,10 +99,18 @@ function NewTournament({ playerId, onClose }: { playerId: string; onClose: () =>
   );
 }
 
+/** "Continue charting" for the scorer, "Follow live" for everyone else. */
+function LiveAction({ m }: { m: Match }) {
+  const { t } = useStore();
+  const { canEdit } = useMatchRights(m);
+  return <span className="ms-auto text-sm font-semibold text-bad">{canEdit ? t('continueCharting') : t('followLive')} →</span>;
+}
+
 export function Compete({ tab }: { tab: 'matches' | 'tournaments' }) {
   const { state, t } = useStore();
   const player = activePlayer(state);
   const canEdit = useCanEdit();
+  const canChart = useCanChart();
   const [adding, setAdding] = useState(false);
   const matches = useMemo(() => (player ? matchesOfPlayer(state, player.id).reverse() : []), [state, player]);
   if (!player) return <div className="py-10"><Empty>{t('noPlayerYet')}</Empty></div>;
@@ -125,7 +133,7 @@ export function Compete({ tab }: { tab: 'matches' | 'tournaments' }) {
   return (
     <div>
       <PageHeader eyebrow={player.name} title={t('competeTitle')}>
-        {canEdit && tab === 'matches' && (
+        {canChart && tab === 'matches' && (
           <a href={href('newmatch')} className="inline-flex h-10 items-center rounded-full bg-accent px-4 text-sm font-semibold text-accent-ink" data-testid="new-match">
             + {t('newMatch')}
           </a>
@@ -159,7 +167,7 @@ export function Compete({ tab }: { tab: 'matches' | 'tournaments' }) {
               <Badge tone="bad"><span className="live-dot" aria-hidden="true" /> {t('live')}</Badge>
               <span className="font-semibold">{t('vsName', { name: m.opponent || t('opponent') })}</span>
               <span className="num font-mono font-semibold" dir="ltr">{scoreLine(m, t)}</span>
-              <span className="ms-auto text-sm font-semibold text-bad">{canEdit ? t('continueCharting') : t('followLive')} →</span>
+              <LiveAction m={m} />
             </a>
           ))}
 
@@ -193,7 +201,7 @@ export function Compete({ tab }: { tab: 'matches' | 'tournaments' }) {
             {matches.length === 0 ? (
               <Empty>
                 {t('noMatches')}
-                {canEdit && (
+                {canChart && (
                   <>
                     {' '}
                     <a href={href('newmatch')} className="font-semibold text-accent">{t('newMatch')} →</a>

@@ -8,7 +8,7 @@ import type { DictKey } from '../lib/i18n';
 import { FORMAT_PRESETS, winnerFromSets, type Side } from '../lib/match';
 import { MATCH_ROUNDS, SURFACES, type Match, type MatchFormat, type SetScore } from '../types';
 import { Button, Card, cx, Empty, Field, inputCls, PageHeader } from '../components/ui';
-import { roundLabel, surfaceLabel, useCanEdit } from '../components/MatchBits';
+import { roundLabel, surfaceLabel, useCanChart, useScorer } from '../components/MatchBits';
 
 /** Segmented choice (radio group with big touch targets). */
 export function Seg<V extends string | number | boolean>({
@@ -352,9 +352,10 @@ function padSets(sets: SetScore[], min: number): SetScore[] {
 export function MatchSetup({ tournamentId }: { tournamentId: string }) {
   const { state, dispatch, t, toast } = useStore();
   const player = activePlayer(state);
-  const canEdit = useCanEdit();
+  const canChart = useCanChart();
+  const scorer = useScorer();
   if (!player) return <Empty>{t('noPlayerYet')}</Empty>;
-  if (!canEdit) return <div className="py-10"><Empty>{t('coachOnly')}</Empty></div>;
+  if (!canChart) return <div className="py-10"><Empty>{t('coachOnly')}</Empty></div>;
   const today = todayISO();
   const tour = tournamentId ? state.tournaments.find((x) => x.id === tournamentId && x.playerId === player.id) : undefined;
   const now = new Date().toISOString();
@@ -383,6 +384,7 @@ export function MatchSetup({ tournamentId }: { tournamentId: string }) {
     ai: null,
     createdAt: now,
     updatedAt: now,
+    ...scorer,
   };
   return (
     <div>

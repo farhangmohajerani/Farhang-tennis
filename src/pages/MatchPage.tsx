@@ -22,9 +22,10 @@ import {
 import { RALLY_STROKES, RETURN_STROKES, screenPoint, seedOf, type ComposerSeed, type StrokeDef, type StrokePick, type Zone } from '../lib/pointEntry';
 import { RALLY, SERVE_DIRS, WINGS, type Match, type PointEnd } from '../types';
 import { Badge, Button, Card, cx, Empty, Modal, PageHeader } from '../components/ui';
-import { courtLabel, dirLabel, names, pointText, rallyLabel, roundLabel, Scoreboard, shortName, shotLabel, StatsTable, surfaceLabel, useCanEdit, wingLabel } from '../components/MatchBits';
+import { courtLabel, ctxScore, dirLabel, names, pointText, rallyLabel, roundLabel, Scoreboard, shortName, shotLabel, StatsTable, surfaceLabel, useMatchRights, useScorer, wingLabel } from '../components/MatchBits';
 import { MatchReport } from './MatchReport';
 import { AiCoach } from '../components/AiCoach';
+import { ExportMatchButton } from '../components/ExportMatch';
 import { MatchForm } from './MatchSetup';
 
 export function MatchPage({ id }: { id: string }) {
@@ -349,17 +350,7 @@ function LastPoint({ p, c, nm, count, onUndo }: { p: Point; c: PointCtx; nm: Rec
 }
 
 /** Score before a point, player first: "S2 · 3-2 · 30-15". */
-export function ctxScore(c: PointCtx, noAd: boolean): string {
-  let pts: string;
-  if (c.tiebreak) pts = `${c.game.p}-${c.game.o}`;
-  else {
-    const call = ['0', '15', '30', '40'];
-    const { p, o } = c.game;
-    if (p >= 3 && o >= 3) pts = p === o ? (noAd ? '40-40*' : '40-40') : p > o ? 'AD-40' : '40-AD';
-    else pts = `${call[p]}-${call[o]}`;
-  }
-  return `S${c.setIndex + 1} · ${c.games.p}-${c.games.o} · ${pts}`;
-}
+export { ctxScore };
 
 export function PointList({ ctx, nm, noAd, limit }: { ctx: PointCtx[]; nm: Record<Side, string>; noAd: boolean; limit?: number }) {
   const { t } = useStore();
@@ -456,8 +447,9 @@ export function EditMatchModal({ m, open, onClose }: { m: Match; open: boolean; 
 
 function MatchLive({ m }: { m: Match }) {
   const { state, dispatch, t, toast, adapter } = useStore();
-  const canEdit = useCanEdit();
-  // Someone following the score (a parent) gets new points within about 2 seconds.
+  const { canEdit, lockedBy, canTakeOver } = useMatchRights(m);
+  const scorer = useScorer();
+  // Whoever follows the score (a parent, or the coach while a parent charts) gets new points within about 2 seconds.
   useEffect(() => {
     if (canEdit) return;
     adapter.setFastSync?.(true);
@@ -498,6 +490,7 @@ function MatchLive({ m }: { m: Match }) {
     <div>
       <PageHeader eyebrow={<MatchContext m={m} />} title={t('vsName', { name: nm.o })}>
         <Badge tone="bad"><span className="live-dot" aria-hidden="true" /> {t('live')}</Badge>
+        <ExportMatchButton m={m} />
         {canEdit && (
           <>
             <Button size="sm" onClick={() => setEditing(true)} data-testid="edit-match">{t('editDetails')}</Button>
@@ -517,7 +510,24 @@ function MatchLive({ m }: { m: Match }) {
               <PointComposer key={m.points.length} e={e} nm={nm} seed={seed} onPoint={addPoint} />
             </>
           ) : (
-            <p className="rounded-xl bg-sunken p-3 text-sm text-muted">{t('liveFollowHelp')}</p>
+            <div className="flex flex-wrap items-center gap-3 rounded-xl bg-sunken p-3 text-sm" data-testid="live-follow">
+              <p className="min-w-0 flex-1 text-muted">
+                {lockedBy === 'parent' ? t('scoredByParent') : lockedBy === 'coach' ? t('scoredByCoach') : t('liveFollowHelp')}
+              </p>
+              {canTakeOver && (
+                <Button
+                  size="sm"
+                  variant="primary"
+                  data-testid="take-over"
+                  onClick={() => {
+                    dispatch({ type: 'saveMatch', match: { ...m, ...scorer } });
+                    toast(t('tookOver'));
+                  }}
+                >
+                  {t('takeOver')}
+                </Button>
+              )}
+            </div>
           )}
         </div>
 

@@ -342,6 +342,8 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth) {
     },
   });
   const adapter = new ArtifactDbAdapter(db, user, `Shared academy database (Supabase) — saved for all coaches; parents see only their own child`);
+  // Parents chart their own child's matches through a checked database function (supabase/family-matches.sql).
+  adapter.familyWriter = { save: (match) => db.rpc('family_save_match', { p_match: match }) };
   render(await adapter.load(), adapter);
 }
 

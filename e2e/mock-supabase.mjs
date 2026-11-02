@@ -164,6 +164,28 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
         }
         return send(200, { playerId: pid, name: pdoc.data.name });
       }
+      if (fn === 'family_save_match') {
+        if (role(u)) return send(200, { error: 'staff_account' });
+        const m = json.p_match;
+        if (!m || typeof m !== 'object' || Array.isArray(m) || !/^[\w.~:@+-]{1,100}$/.test(String(m.id)) || !m.playerId) return send(200, { error: 'bad_match' });
+        const pdoc = docs.get(`academy/data/players/${m.playerId}`);
+        if (!pdoc || !(pdoc.data.parentIds ?? []).includes(u.id)) return send(200, { error: 'not_linked' });
+        const old = docs.get(`academy/data/matches/${m.id}`);
+        if (old && (old.data.playerId !== m.playerId || old.data.scorerId !== u.id)) return send(200, { error: 'not_scorer' });
+        const data = { ...m, scorerId: u.id, scorerRole: 'parent', ai: old?.data.ai ?? null };
+        const path = `academy/data/matches/${m.id}`;
+        docs.set(path, { path, parent: parentOf(path), data, updated_at: stamp() });
+        for (const pid of pdoc.data.parentIds) {
+          const fpath = `family/${pid}/players/${m.playerId}`;
+          const f = docs.get(fpath);
+          if (f) {
+            const matches = [...(f.data.matches ?? []).filter((x) => x.id !== m.id), data].sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt).localeCompare(String(b.createdAt)));
+            f.data = { ...f.data, matches };
+            f.updated_at = stamp();
+          }
+        }
+        return send(200, { ok: true });
+      }
       if (fn === 'user_emails') {
         if (!role(u)) return send(200, []);
         return send(200, [...users.values()].filter((x) => json.p_ids.includes(x.id)).map((x) => ({ id: x.id, email: x.email })));

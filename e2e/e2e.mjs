@@ -493,6 +493,56 @@ async function run(engineName) {
     assert.equal(await total(), whole);
   });
 
+  await step('match report: share the report — preview in both languages, send, download, PDF, summary, email', async () => {
+    await go('match-match-demo-1');
+    const score = (await page.getByTestId('score-line').innerText()).trim();
+    await page.getByTestId('export-match').click();
+    await page.getByTestId('export-modal').waitFor();
+    const doc = page.frameLocator('[data-testid="export-preview"]');
+    await doc.locator('h1').waitFor();
+    assert.equal(await doc.locator('html').getAttribute('dir'), 'ltr');
+    assert.ok((await doc.locator('table.stats').innerText()).includes('Break points saved'));
+    await page.getByTestId('export-lang-fa').click();
+    await doc.locator('html[dir="rtl"]').waitFor();
+    assert.ok((await doc.locator('.brand').innerText()).includes('گزارش مسابقه'));
+    await page.getByTestId('export-lang-en').click();
+    await doc.locator('html[dir="ltr"]').waitFor();
+    // Download: one self-contained file with the score, the statistics and the match data inside.
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export-download').click()]);
+    assert.match(dl.suggestedFilename(), /^21gram-.+-vs-.+-\d{4}-\d{2}-\d{2}\.html$/);
+    const file = fs.readFileSync(await dl.path(), 'utf8');
+    assert.match(file, /^<!doctype html>/);
+    for (const part of score.replace(/\s*\(.*\)$/, '').split(' ')) assert.ok(file.includes(`>${part.split('-')[0]}`), `set ${part}`);
+    assert.ok(file.includes('id="tennis-match"'));
+    // Send: without a share sheet (desktop test browser) the file is downloaded instead, with a note.
+    const [dl2] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export-share').click()]);
+    assert.equal(dl2.suggestedFilename(), dl.suggestedFilename());
+    await toast(/downloaded instead/);
+    // PDF / print uses the preview's own print; copy and email carry the summary.
+    await page.evaluate(() => {
+      const f = document.querySelector('[data-testid="export-preview"]');
+      f.contentWindow.print = () => { window.__printed = true; };
+      const w = window;
+      try { Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (t) => { w.__copied = t; } } }); } catch { /* keep */ }
+    });
+    await page.getByTestId('export-print').click();
+    assert.equal(await page.evaluate(() => window.__printed), true);
+    await page.getByTestId('export-copy').click();
+    await toast(/Summary copied/);
+    const copied = await page.evaluate(() => window.__copied);
+    assert.match(copied, /^🎾 /);
+    assert.ok(copied.includes('Total points won'));
+    const mail = decodeURIComponent((await page.getByTestId('export-email').getAttribute('href')) ?? '');
+    assert.ok(mail.startsWith('mailto:?subject=') && mail.includes('Total points won'));
+    await page.keyboard.press('Escape');
+    await page.getByTestId('export-modal').waitFor({ state: 'detached' });
+    // Parents can send their child's report too.
+    await setRole('parent');
+    await go('match-match-demo-1');
+    await page.getByTestId('export-match').waitFor();
+    await setRole('admin');
+  });
+
   await step('AI Coach: the coach’s own key, OpenAI and Gemini answers kept with the match, clear errors, parents read it', async () => {
     const sent = [];
     const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, OPTIONS' };

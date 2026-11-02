@@ -17,10 +17,11 @@ import {
   type Engine,
   type MatchStats,
   type Point,
+  type PointCtx,
   type Side,
 } from '../lib/match';
 import type { GoalStatus } from '../lib/competition';
-import { COURT_SIDES, SERVE_DIRS, type CourtSide, type Match, type PointEnd, type Rally, type Round, type ServeDir, type ShotType, type Surface, type Wing } from '../types';
+import { COURT_SIDES, SERVE_DIRS, type CourtSide, type Match, type MatchFormat, type PointEnd, type Rally, type Round, type ServeDir, type ShotType, type Surface, type Wing } from '../types';
 import { Badge, cx } from './ui';
 
 type T = (key: DictKey, vars?: Record<string, string | number>) => string;
@@ -46,9 +47,73 @@ export const endLabel = (t: T, e: PointEnd) => t(`end_${e}` as DictKey);
 /** First name for compact buttons ("Ela Demir" → "Ela"). */
 export const shortName = (name: string) => name.trim().split(/\s+/)[0] || name;
 
+/** "Best of 3 · Short sets · Match tie-break · No-ad" */
+export function formatText(f: MatchFormat, t: T): string {
+  const parts = [f.sets === 1 ? t('oneSetOpt') : t('bestOf', { n: f.sets })];
+  if (f.games === 4) parts.push(t('shortSetsLabel'));
+  if (f.sets > 1 && f.finalSet === 'mtb') parts.push(t('finalMtb'));
+  parts.push(f.noAd ? t('noAdShort') : t('adShort'));
+  return parts.join(' · ');
+}
+
+/** "S2 · 3-4 · 30-40" — the score before a point. */
+export function ctxScore(c: PointCtx, noAd: boolean): string {
+  let pts: string;
+  if (c.tiebreak) pts = `${c.game.p}-${c.game.o}`;
+  else {
+    const call = ['0', '15', '30', '40'];
+    const { p, o } = c.game;
+    if (p >= 3 && o >= 3) pts = p === o ? (noAd ? '40-40*' : '40-40') : p > o ? 'AD-40' : '40-AD';
+    else pts = `${call[p]}-${call[o]}`;
+  }
+  return `S${c.setIndex + 1} · ${c.games.p}-${c.games.o} · ${pts}`;
+}
+
 export function useCanEdit(): boolean {
   const { state, adapter } = useStore();
   return state.settings.role !== 'parent' && adapter.canWrite !== false;
+}
+
+/** May start a new match: coaches, and parents who chart their own child's matches. */
+export function useCanChart(): boolean {
+  const { state, adapter } = useStore();
+  const staff = state.settings.role !== 'parent' && adapter.canWrite !== false;
+  return staff || (state.settings.role === 'parent' && !!adapter.canChart);
+}
+
+export interface MatchRights {
+  /** May enter points, finish, reopen and edit details. */
+  canEdit: boolean;
+  /** Someone else is charting this live match right now. */
+  lockedBy: 'coach' | 'parent' | null;
+  /** A coach may take the scoring over. */
+  canTakeOver: boolean;
+  /** Deleting stays with coaches. */
+  canDelete: boolean;
+}
+
+/** One person charts a match at a time (its scorer); everyone else follows read-only. */
+export function useMatchRights(m: Match): MatchRights {
+  const { state, adapter } = useStore();
+  const role = state.settings.role;
+  const me = adapter.myId ?? null;
+  const staff = role !== 'parent' && adapter.canWrite !== false;
+  const mine = !!me && m.scorerId === me;
+  const someoneElse = !!m.scorerId && !mine;
+  const live = m.status === 'live';
+  if (staff) {
+    const locked = live && someoneElse;
+    return { canEdit: !locked, lockedBy: locked ? m.scorerRole ?? 'coach' : null, canTakeOver: locked, canDelete: true };
+  }
+  if (role === 'parent' && adapter.canChart && mine) return { canEdit: true, lockedBy: null, canTakeOver: false, canDelete: false };
+  return { canEdit: false, lockedBy: live && m.scorerId ? m.scorerRole ?? 'coach' : null, canTakeOver: false, canDelete: false };
+}
+
+/** Scorer fields for a match this viewer starts or takes over. */
+export function useScorer(): Pick<Match, 'scorerId' | 'scorerRole'> {
+  const { state, adapter } = useStore();
+  const id = adapter.myId ?? undefined;
+  return id ? { scorerId: id, scorerRole: state.settings.role === 'parent' ? 'parent' : 'coach' } : {};
 }
 
 export function names(m: Match, playerName: string, t: T): Record<Side, string> {
@@ -209,15 +274,71 @@ function SectionRow({ label }: { label: string }) {
   );
 }
 
+export interface StatLine {
+  label: string;
+  p: number | Pair;
+  o: number | Pair;
+  pct?: boolean;
+  /** Lower is better (errors). */
+  invert?: boolean;
+  testid?: string;
+}
+
+/** The statistics rows, by section — used by the table here and by the exported report. */
+export function statSections(st: MatchStats, t: T): { title: string; rows: StatLine[] }[] {
+  const P = st.p;
+  const O = st.o;
+  const svcWon = (x: MatchStats['p']): Pair => [x.firstWon + x.secondWon, x.servicePoints];
+  return [
+    {
+      title: t('secServe'),
+      rows: [
+        { label: t('st_aces'), p: P.aces, o: O.aces },
+        { label: t('st_df'), p: P.doubleFaults, o: O.doubleFaults, invert: true },
+        { label: t('st_firstIn'), p: [P.firstIn, P.servicePoints], o: [O.firstIn, O.servicePoints], pct: true },
+        { label: t('st_firstWon'), p: [P.firstWon, P.firstIn], o: [O.firstWon, O.firstIn], pct: true },
+        { label: t('st_secondWon'), p: [P.secondWon, P.secondPlayed], o: [O.secondWon, O.secondPlayed], pct: true },
+        { label: t('st_svcPtsWon'), p: svcWon(P), o: svcWon(O), pct: true, testid: 'svc-pts' },
+        { label: t('st_svcWinners'), p: P.serviceWinners, o: O.serviceWinners },
+        { label: t('st_bpSaved'), p: [P.bpSaved, P.bpFaced], o: [O.bpSaved, O.bpFaced], pct: true },
+        { label: t('st_svcGames'), p: [P.serviceGamesWon, P.serviceGames], o: [O.serviceGamesWon, O.serviceGames], pct: true },
+      ],
+    },
+    {
+      title: t('secReturn'),
+      rows: [
+        { label: t('st_retWon'), p: [P.returnWon, P.returnPoints], o: [O.returnWon, O.returnPoints], pct: true },
+        { label: t('st_ret1'), p: [P.returnFirstWon, P.returnFirstPlayed], o: [O.returnFirstWon, O.returnFirstPlayed], pct: true },
+        { label: t('st_ret2'), p: [P.returnSecondWon, P.returnSecondPlayed], o: [O.returnSecondWon, O.returnSecondPlayed], pct: true },
+        { label: t('st_retIn1'), p: [P.returnIn1, P.returnFaced1], o: [O.returnIn1, O.returnFaced1], pct: true, testid: 'ret-in-1' },
+        { label: t('st_retIn2'), p: [P.returnIn2, P.returnFaced2], o: [O.returnIn2, O.returnFaced2], pct: true, testid: 'ret-in-2' },
+        { label: t('st_retErr'), p: P.returnErrors, o: O.returnErrors, invert: true },
+        { label: t('st_bpConv'), p: [P.bpConverted, P.bpChances], o: [O.bpConverted, O.bpChances], pct: true },
+        { label: t('st_retGames'), p: [P.returnGamesWon, P.returnGames], o: [O.returnGamesWon, O.returnGames], pct: true },
+      ],
+    },
+    {
+      title: t('secPoints'),
+      rows: [
+        { label: t('st_winners'), p: P.winners, o: O.winners },
+        { label: t('st_ue'), p: P.unforcedErrors, o: O.unforcedErrors, invert: true },
+        { label: t('st_fe'), p: P.forcedErrors, o: O.forcedErrors, invert: true },
+        { label: t('st_netWon'), p: [st.net.p.won, st.net.p.played], o: [st.net.o.won, st.net.o.played], pct: true, testid: 'net' },
+        ...(st.tbPoints > 0 ? [{ label: t('st_tbWon'), p: [P.tbPointsWon, st.tbPoints] as Pair, o: [O.tbPointsWon, st.tbPoints] as Pair, pct: true, testid: 'tb' }] : []),
+        { label: t('st_maxPoints'), p: P.maxPointRun, o: O.maxPointRun, testid: 'max-points' },
+        { label: t('st_maxGames'), p: P.maxGameRun, o: O.maxGameRun, testid: 'max-games' },
+        { label: t('st_total'), p: [P.pointsWon, st.points], o: [O.pointsWon, st.points], pct: true },
+      ],
+    },
+  ];
+}
+
 /**
  * Match statistics in the categories Grand Slam and ATP/WTA match pages use, plus what manual
  * charting adds (returns in play, unreturned serves, net points for both players).
  */
 export function StatsTable({ st, nm }: { st: MatchStats; nm: Record<Side, string> }) {
   const { t } = useStore();
-  const P = st.p;
-  const O = st.o;
-  const svcWon = (x: MatchStats['p']): Pair => [x.firstWon + x.secondWon, x.servicePoints];
   return (
     <div className="overflow-hidden rounded-2xl border border-line bg-surface" data-testid="stats-table">
       <table className="num w-full table-fixed text-sm" dir="ltr">
@@ -229,34 +350,10 @@ export function StatsTable({ st, nm }: { st: MatchStats; nm: Record<Side, string
           </tr>
         </thead>
         <tbody>
-          <SectionRow label={t('secServe')} />
-          <StatRow label={t('st_aces')} p={P.aces} o={O.aces} />
-          <StatRow label={t('st_df')} p={P.doubleFaults} o={O.doubleFaults} invert />
-          <StatRow label={t('st_firstIn')} p={[P.firstIn, P.servicePoints]} o={[O.firstIn, O.servicePoints]} pct />
-          <StatRow label={t('st_firstWon')} p={[P.firstWon, P.firstIn]} o={[O.firstWon, O.firstIn]} pct />
-          <StatRow label={t('st_secondWon')} p={[P.secondWon, P.secondPlayed]} o={[O.secondWon, O.secondPlayed]} pct />
-          <StatRow label={t('st_svcPtsWon')} p={svcWon(P)} o={svcWon(O)} pct testid="svc-pts" />
-          <StatRow label={t('st_svcWinners')} p={P.serviceWinners} o={O.serviceWinners} />
-          <StatRow label={t('st_bpSaved')} p={[P.bpSaved, P.bpFaced]} o={[O.bpSaved, O.bpFaced]} pct />
-          <StatRow label={t('st_svcGames')} p={[P.serviceGamesWon, P.serviceGames]} o={[O.serviceGamesWon, O.serviceGames]} pct />
-          <SectionRow label={t('secReturn')} />
-          <StatRow label={t('st_retWon')} p={[P.returnWon, P.returnPoints]} o={[O.returnWon, O.returnPoints]} pct />
-          <StatRow label={t('st_ret1')} p={[P.returnFirstWon, P.returnFirstPlayed]} o={[O.returnFirstWon, O.returnFirstPlayed]} pct />
-          <StatRow label={t('st_ret2')} p={[P.returnSecondWon, P.returnSecondPlayed]} o={[O.returnSecondWon, O.returnSecondPlayed]} pct />
-          <StatRow label={t('st_retIn1')} p={[P.returnIn1, P.returnFaced1]} o={[O.returnIn1, O.returnFaced1]} pct testid="ret-in-1" />
-          <StatRow label={t('st_retIn2')} p={[P.returnIn2, P.returnFaced2]} o={[O.returnIn2, O.returnFaced2]} pct testid="ret-in-2" />
-          <StatRow label={t('st_retErr')} p={P.returnErrors} o={O.returnErrors} invert />
-          <StatRow label={t('st_bpConv')} p={[P.bpConverted, P.bpChances]} o={[O.bpConverted, O.bpChances]} pct />
-          <StatRow label={t('st_retGames')} p={[P.returnGamesWon, P.returnGames]} o={[O.returnGamesWon, O.returnGames]} pct />
-          <SectionRow label={t('secPoints')} />
-          <StatRow label={t('st_winners')} p={P.winners} o={O.winners} />
-          <StatRow label={t('st_ue')} p={P.unforcedErrors} o={O.unforcedErrors} invert />
-          <StatRow label={t('st_fe')} p={P.forcedErrors} o={O.forcedErrors} invert />
-          <StatRow label={t('st_netWon')} p={[st.net.p.won, st.net.p.played]} o={[st.net.o.won, st.net.o.played]} pct testid="net" />
-          {st.tbPoints > 0 && <StatRow label={t('st_tbWon')} p={[P.tbPointsWon, st.tbPoints]} o={[O.tbPointsWon, st.tbPoints]} pct testid="tb" />}
-          <StatRow label={t('st_maxPoints')} p={P.maxPointRun} o={O.maxPointRun} testid="max-points" />
-          <StatRow label={t('st_maxGames')} p={P.maxGameRun} o={O.maxGameRun} testid="max-games" />
-          <StatRow label={t('st_total')} p={[P.pointsWon, st.points]} o={[O.pointsWon, st.points]} pct />
+          {statSections(st, t).flatMap((sec) => [
+            <SectionRow key={sec.title} label={sec.title} />,
+            ...sec.rows.map((r) => <StatRow key={`${sec.title}-${r.label}`} {...r} />),
+          ])}
         </tbody>
       </table>
     </div>
@@ -285,7 +382,7 @@ function Panel({ title, help, children, testid }: { title: ReactNode; help?: str
 
 /* ---------- winners and errors, one chart per player ---------- */
 
-interface Bar {
+export interface Bar {
   key: string;
   label: string;
   /** Winners, or unforced errors (and serve / return errors, which are not split). */
@@ -293,9 +390,9 @@ interface Bar {
   /** Forced errors (rally shots only). */
   b: number;
 }
-type GroupKey = 'serve' | 'return' | 'rally';
+export type GroupKey = 'serve' | 'return' | 'rally';
 
-function rowsOf(st: MatchStats, side: Side, kind: 'winners' | 'errors', t: T): { key: GroupKey; rows: Bar[] }[] {
+export function rowsOf(st: MatchStats, side: Side, kind: 'winners' | 'errors', t: T): { key: GroupKey; rows: Bar[] }[] {
   const S = st[side];
   const strokes = Object.values(st.strokes[side]);
   // "Forehand", "FH · Slice", "Overhead": the short wing keeps two-part labels on one line.

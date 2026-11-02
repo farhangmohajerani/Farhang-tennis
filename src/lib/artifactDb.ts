@@ -17,7 +17,7 @@
  * keep up to date whenever a linked child's data changes. Only the owner writes the
  * library and thresholds.
  */
-import { DrillSchema, LogSchema, MatchSchema, PlanSchema, PlayerSchema, ThresholdsSchema, TournamentSchema, type AppState, type Level, type Role, type Thresholds } from '../types';
+import { DrillSchema, LogSchema, MatchSchema, PlanSchema, PlayerSchema, ThresholdsSchema, TournamentSchema, type AppState, type Level, type Match, type Role, type Thresholds } from '../types';
 import { SEED_DRILLS } from '../data/drills';
 import { LEVEL_THRESHOLDS } from '../data/drills/factory';
 import type { StorageAdapter } from './storage';
@@ -125,6 +125,17 @@ export function docsOf(s: AppState): Map<string, Record<string, unknown>> {
 /** Placeholder meaning "exists remotely, contents unknown": forces one rewrite and lets unlinks delete it. */
 const UNKNOWN = '\u0000unknown';
 
+/** Same text for the same match, whatever order its fields were built in. */
+function matchJson(m: Match): string {
+  const r = MatchSchema.safeParse(m);
+  return JSON.stringify(r.success ? r.data : m);
+}
+
+/** Supabase: how a parent saves a match they chart for their own child (supabase/family-matches.sql). */
+export interface FamilyWriter {
+  save(match: Match): Promise<{ ok?: boolean; error?: string } | null>;
+}
+
 export class ArtifactDbAdapter implements StorageAdapter {
   readonly kind = 'artifact' as const;
   label = 'Shared academy database on claude.ai — saved for everyone this page is shared with';
@@ -151,6 +162,19 @@ export class ArtifactDbAdapter implements StorageAdapter {
 
   /** This viewer's claude.ai user id (parents need it for their family path). */
   myId: string | null = null;
+
+  /** Set on Supabase: parents may then chart their own child's matches. */
+  familyWriter: FamilyWriter | null = null;
+  get canChart(): boolean {
+    return this.maxRole === 'parent' && !!this.familyWriter && !!this.myId;
+  }
+  /** Matches this parent charts: the version last written or received, and when it was written. */
+  private famSent = new Map<string, string>();
+  private famWrittenAt = new Map<string, number>();
+  private famQueue = new Map<string, Match>();
+  private famCurrent: string | null = null;
+  private famRunning = false;
+  private famFailures = 0;
 
   async load(): Promise<AppState> {
     const [owner, editor, myId] = await Promise.all([this.user?.isOwner() ?? false, this.user?.canEdit() ?? false, this.user?.id() ?? null]);
@@ -259,6 +283,7 @@ export class ArtifactDbAdapter implements StorageAdapter {
         for (const x of (raw.drills as unknown[]) ?? []) { const r = DrillSchema.safeParse(x); if (r.success) overrides.set(r.data.id, r.data); }
       }
       out.players.sort((a, b) => a.name.localeCompare(b.name));
+      if (this.canChart) out.matches = this.mergeMine(out.matches, s.matches);
       out.drills = SEED_DRILLS.map((d) => {
         const o = overrides.get(d.id) ?? d;
         const a = access.get(d.id);
@@ -281,6 +306,83 @@ export class ArtifactDbAdapter implements StorageAdapter {
     initialised = true;
     state = build(state);
     return state;
+  }
+
+  /**
+   * A parent's own matches: the family copy can lag a moment behind what this device just charted,
+   * so the local version stays while it is being written or is newer. If a coach took the scoring
+   * over, theirs wins.
+   */
+  private mergeMine(remote: Match[], local: Match[]): Match[] {
+    const me = this.myId;
+    const out = new Map(remote.map((m) => [m.id, m]));
+    const now = Date.now();
+    for (const l of local) {
+      if (l.scorerId !== me) continue;
+      const r = out.get(l.id);
+      const pending = this.famQueue.has(l.id) || this.famCurrent === l.id;
+      if (!r) {
+        const recent = now - (this.famWrittenAt.get(l.id) ?? 0) < 15000;
+        // New here and not saved yet, or saved moments ago: keep. Otherwise a coach deleted it.
+        if (pending || recent || !this.famSent.has(l.id)) out.set(l.id, l);
+        else this.famSent.delete(l.id);
+        continue;
+      }
+      if (r.scorerId !== me) {
+        this.famSent.delete(l.id);
+        continue;
+      }
+      if (pending || l.updatedAt > r.updatedAt) out.set(l.id, l);
+    }
+    for (const r of remote) if (r.scorerId === me && !this.famSent.has(r.id) && !this.famQueue.has(r.id)) this.famSent.set(r.id, matchJson(r));
+    return [...out.values()];
+  }
+
+  /** Parents: write the matches they chart, one at a time, newest version only. */
+  private saveFamilyMatches(state: AppState): Promise<void> {
+    if (!this.canChart) return Promise.resolve();
+    for (const m of state.matches) {
+      if (m.scorerId !== this.myId) continue;
+      if (this.famSent.get(m.id) !== matchJson(m)) this.famQueue.set(m.id, m);
+    }
+    void this.runFamily();
+    return this.fatal ? Promise.reject(new Error(this.fatal)) : Promise.resolve();
+  }
+
+  private async runFamily() {
+    if (this.famRunning || !this.familyWriter) return;
+    this.famRunning = true;
+    try {
+      while (this.famQueue.size) {
+        const [id, m] = this.famQueue.entries().next().value as [string, Match];
+        this.famQueue.delete(id);
+        this.famCurrent = id;
+        try {
+          const r = await this.familyWriter.save(m);
+          if (r?.error === 'not_scorer') {
+            // A coach took over: their version arrives with the next update.
+            this.famSent.delete(id);
+          } else if (r?.error) {
+            throw new Error(r.error);
+          } else {
+            this.famSent.set(id, matchJson(m));
+            this.famWrittenAt.set(id, Date.now());
+          }
+          this.famFailures = 0;
+          this.fatal = null;
+        } catch (e) {
+          // Offline at the courts is common: keep the newest version and try again.
+          if (!this.famQueue.has(id)) this.famQueue.set(id, m);
+          this.fatal = e instanceof Error ? e.message : String(e);
+          this.famFailures++;
+          await sleep(Math.min(30000, 1500 * this.famFailures));
+        } finally {
+          this.famCurrent = null;
+        }
+      }
+    } finally {
+      this.famRunning = false;
+    }
   }
 
   /** Called once by the store; later remote changes arrive through it. */
@@ -399,6 +501,7 @@ export class ArtifactDbAdapter implements StorageAdapter {
   /** Diff the state against what the database holds and write only what changed. */
   save(state: AppState): Promise<void> {
     writePrefs(state.settings);
+    if (this.maxRole === 'parent') return this.saveFamilyMatches(state);
     if (!this.canWrite) return Promise.resolve();
     const next = docsOf(state);
     for (const [path, body] of next) {

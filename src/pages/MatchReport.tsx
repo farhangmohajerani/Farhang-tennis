@@ -2,21 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../lib/store';
 import { href, navigate } from '../lib/router';
 import { setsText, statsFromReplay, summary, type DisplaySet, type Side } from '../lib/match';
-import type { Match, MatchFormat } from '../types';
+import type { Match } from '../types';
 import { Badge, Button, Card, ConfirmButton, cx, Field, inputCls, PageHeader, SectionTitle } from '../components/ui';
-import { DetailedAnalysis, MomentumChart, names, ResultBadge, scoreLine, StatsTable, useCanEdit } from '../components/MatchBits';
+import { DetailedAnalysis, MomentumChart, names, formatText, ResultBadge, scoreLine, StatsTable, useMatchRights, useScorer } from '../components/MatchBits';
 import { EditMatchModal, MatchContext, PointList } from './MatchPage';
 import { AiCoach } from '../components/AiCoach';
+import { ExportMatchButton } from '../components/ExportMatch';
 
-type T = ReturnType<typeof useStore>['t'];
-
-export function formatText(f: MatchFormat, t: T): string {
-  const parts = [f.sets === 1 ? t('oneSetOpt') : t('bestOf', { n: f.sets })];
-  if (f.games === 4) parts.push(t('shortSetsLabel'));
-  if (f.sets > 1 && f.finalSet === 'mtb') parts.push(t('finalMtb'));
-  parts.push(f.noAd ? t('noAdShort') : t('adShort'));
-  return parts.join(' · ');
-}
+export { formatText };
 
 function FinalScore({ sets, nm, winner }: { sets: DisplaySet[]; nm: Record<Side, string>; winner: Side | null }) {
   return (
@@ -50,7 +43,8 @@ function FinalScore({ sets, nm, winner }: { sets: DisplaySet[]; nm: Record<Side,
 
 export function MatchReport({ m }: { m: Match }) {
   const { state, dispatch, t, toast } = useStore();
-  const canEdit = useCanEdit();
+  const { canEdit, canDelete } = useMatchRights(m);
+  const scorer = useScorer();
   const player = state.players.find((p) => p.id === m.playerId);
   const nm = names(m, player?.name ?? t('player'), t);
   const sum = useMemo(() => summary(m), [m]);
@@ -70,6 +64,7 @@ export function MatchReport({ m }: { m: Match }) {
   return (
     <div>
       <PageHeader eyebrow={<MatchContext m={m} />} title={t('vsName', { name: nm.o })}>
+        <ExportMatchButton m={m} />
         {canEdit && (
           <>
             <Button size="sm" onClick={() => setEditing(true)} data-testid="edit-match">{t('editDetails')}</Button>
@@ -81,7 +76,8 @@ export function MatchReport({ m }: { m: Match }) {
                   // A completed match reopens one point back so the result can be corrected.
                   const points = finishedByScore ? m.points.slice(0, -1) : m.points;
                   const oppNet = m.oppNet.filter((i) => i < points.length);
-                  dispatch({ type: 'saveMatch', match: { ...m, points, oppNet, status: 'live', winner: null, endReason: 'completed' } });
+                  // Whoever reopens a match charts it from here on.
+                  dispatch({ type: 'saveMatch', match: { ...m, ...scorer, points, oppNet, status: 'live', winner: null, endReason: 'completed' } });
                   toast(finishedByScore ? t('pointUndone') : t('chartingResumed'));
                 }}
               >
@@ -185,7 +181,7 @@ export function MatchReport({ m }: { m: Match }) {
         </details>
       )}
 
-      {canEdit && (
+      {canDelete && (
         <div className="mt-8 flex justify-end border-t border-line pt-4">
           <ConfirmButton
             label={t('deleteMatch')}

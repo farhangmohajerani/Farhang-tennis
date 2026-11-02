@@ -297,6 +297,12 @@ export const MatchSchema = z.object({
     .default(null),
   createdAt: z.string(),
   updatedAt: z.string(),
+  /**
+   * Who is charting this match (a user id) and as what. Only the scorer enters points; everyone else
+   * follows read-only, and a coach can take over. Older matches have no scorer: any coach may chart.
+   */
+  scorerId: z.string().max(100).optional(),
+  scorerRole: z.enum(['coach', 'parent']).optional(),
 });
 export type Match = z.infer<typeof MatchSchema>;
 export type MatchInsight = NonNullable<Match['ai']>;
