@@ -14,6 +14,7 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
   const docs = new Map(); // path -> {path, data, updated_at}
   const codes = new Map(); // user_id -> code
   const requests = new Map(); // user_id -> {user_id, email}
+  const subs = new Map(); // user_id -> {user_id, plan, expires_at, source}
   let clock = 0;
   const stamp = () => new Date(Date.UTC(2026, 0, 1) + ++clock * 1000).toISOString();
 
@@ -99,6 +100,23 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
         const hit = [...codes.entries()].find(([, c]) => c === json.p_code);
         return send(200, hit ? hit[0] : null);
       }
+      if (fn === 'delete_my_account') {
+        if (role(u) === 'admin' && [...staff.values()].filter((x) => x.role === 'admin').length <= 1) return send(400, { message: 'last_admin' });
+        for (const path of [...docs.keys()]) if (path.startsWith(`family/${u.id}/`)) docs.delete(path);
+        for (const d of docs.values()) {
+          if (d.path.startsWith('academy/data/players/') && Array.isArray(d.data.parentIds) && d.data.parentIds.includes(u.id)) {
+            d.data = { ...d.data, parentIds: d.data.parentIds.filter((x) => x !== u.id) };
+            d.updated_at = stamp();
+          }
+        }
+        staff.delete(u.id);
+        subs.delete(u.id);
+        codes.delete(u.id);
+        requests.delete(u.id);
+        users.delete(u.email);
+        for (const [t, x] of tokens) if (x.id === u.id) tokens.delete(t);
+        return send(204);
+      }
       if (fn === 'user_emails') {
         if (!role(u)) return send(200, []);
         return send(200, [...users.values()].filter((x) => json.p_ids.includes(x.id)).map((x) => ({ id: x.id, email: x.email })));
@@ -126,6 +144,24 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
       if (req.method === 'DELETE') {
         const path = url.searchParams.get('path').replace(/^eq\./, '');
         if (canWrite(u, path)) docs.delete(path);
+        return send(204);
+      }
+    }
+    if (p === '/rest/v1/subscriptions') {
+      const eq = (k) => url.searchParams.get(k)?.replace(/^eq\./, '');
+      if (req.method === 'GET') {
+        let rows = [...subs.values()].filter((r) => r.user_id === u.id || role(u) === 'admin');
+        if (eq('user_id')) rows = rows.filter((r) => r.user_id === eq('user_id'));
+        return send(200, rows);
+      }
+      if (role(u) !== 'admin') return send(403, { message: 'row-level security' });
+      if (req.method === 'POST') {
+        if (json.source !== 'manual') return send(403, { message: 'row-level security' });
+        subs.set(json.user_id, { user_id: json.user_id, plan: json.plan, expires_at: json.expires_at ?? null, source: 'manual' });
+        return send(201);
+      }
+      if (req.method === 'DELETE') {
+        subs.delete(eq('user_id'));
         return send(204);
       }
     }
@@ -160,5 +196,5 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
     send(404, { message: 'not found ' + p });
   });
   const linkFor = (email) => issue(users.get(email));
-  return new Promise((r) => server.listen(port, () => r({ server, docs, staff, invites, linkFor })));
+  return new Promise((r) => server.listen(port, () => r({ server, docs, staff, invites, subs, users, linkFor })));
 }

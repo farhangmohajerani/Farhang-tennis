@@ -4,7 +4,7 @@ import { href } from '../lib/router';
 import { ROLES, type Role } from '../types';
 import { roleKey, type DictKey } from '../lib/i18n';
 import { activePlayer } from '../lib/reducer';
-import { cx, Icon, Toasts } from './ui';
+import { Button, cx, Icon, inputCls, Modal, Toasts } from './ui';
 import { PlayersModal } from './Players';
 import { getTeam } from '../lib/team';
 
@@ -28,6 +28,7 @@ export function Layout({ route, children }: { route: string; children: ReactNode
   const mobileItems = role === 'parent' ? items : items.filter((n) => n.name !== 'parent');
   const activeName = route === 'drill' ? 'library' : ['tournaments', 'match', 'newmatch', 'tournament'].includes(route) ? 'matches' : route;
   const [playersOpen, setPlayersOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const rank: Record<Role, number> = { parent: 0, coach: 1, admin: 2 };
   const roles = ROLES.filter((r) => !adapter.maxRole || rank[r] <= rank[adapter.maxRole]);
   const canManage = role !== 'parent' && adapter.canWrite !== false;
@@ -121,6 +122,7 @@ export function Layout({ route, children }: { route: string; children: ReactNode
         </div>
       )}
       {playersOpen && <PlayersModal open={playersOpen} onClose={() => setPlayersOpen(false)} />}
+      {deleting && <DeleteAccountModal onClose={() => setDeleting(false)} />}
 
       <main className="gutter mx-auto w-full max-w-6xl flex-1 pb-28 md:pb-12">{children}</main>
 
@@ -138,6 +140,9 @@ export function Layout({ route, children }: { route: string; children: ReactNode
               · {t('signedInAs', { email: getTeam()!.myEmail })}
               <button type="button" className="font-semibold text-accent" onClick={() => getTeam()!.signOut()} data-testid="sign-out">
                 {t('signOutBtn')}
+              </button>
+              <button type="button" className="font-semibold text-bad" onClick={() => setDeleting(true)} data-testid="delete-account">
+                {t('deleteAccount')}
               </button>
             </span>
           )}
@@ -166,5 +171,49 @@ export function Layout({ route, children }: { route: string; children: ReactNode
       </nav>
       <Toasts />
     </div>
+  );
+}
+
+/** App Store rule: an account made in the app can be deleted in the app. */
+function DeleteAccountModal({ onClose }: { onClose: () => void }) {
+  const { t } = useStore();
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const word = t('deleteWord');
+  return (
+    <Modal open onClose={onClose} title={t('deleteAccountTitle')}>
+      <div className="flex flex-col gap-3">
+        <p className="text-sm">{t('deleteAccountText')}</p>
+        <label className="flex flex-col gap-1 text-[13px] font-semibold">
+          {t('deleteAccountType', { word })}
+          <input className={inputCls} value={typed} onChange={(e) => setTyped(e.target.value)} autoCapitalize="characters" data-testid="delete-confirm-input" />
+        </label>
+        {err && <p className="text-sm text-bad" role="alert">{err}</p>}
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>{t('cancel')}</Button>
+          <Button
+            variant="danger"
+            disabled={busy || typed.trim().toUpperCase() !== word.toUpperCase()}
+            data-testid="delete-account-confirm"
+            onClick={async () => {
+              setBusy(true);
+              setErr('');
+              try {
+                await getTeam()!.deleteAccount();
+                window.location.replace(`${window.location.pathname}#account-deleted`);
+                window.location.reload();
+              } catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                setErr(/last_admin/.test(msg) ? t('lastAdmin') : msg.slice(0, 200));
+                setBusy(false);
+              }
+            }}
+          >
+            {t('deleteAccountBtn')}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }

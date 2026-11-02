@@ -306,6 +306,41 @@ async function run(engineName) {
     await page.getByRole('cell', { name: '≥42%' }).waitFor();
   });
 
+  await step('subscriptions: free and Pro drills, the admin switch, a parent sees locks except for assigned drills', async () => {
+    await go('admin');
+    const toggle = page.getByTestId('paywall-toggle');
+    assert.equal(await toggle.getAttribute('aria-checked'), 'false', 'off by default');
+    await toggle.click();
+    assert.equal(await toggle.getAttribute('aria-checked'), 'true');
+    assert.match(await page.getByTestId('access-counts').innerText(), /\d+ free · \d+ Pro drills/);
+    const fh1 = page.getByTestId('access-fh-001');
+    assert.equal(await fh1.innerText(), 'Free', 'beginner drills are free by default');
+    await fh1.click();
+    assert.equal(await fh1.innerText(), 'Pro');
+    await setRole('parent');
+    await go('drill-fh-001');
+    await page.getByTestId('pro-card').waitFor();
+    assert.equal(await page.getByText('Coaching cues').count(), 0, 'a locked drill hides its content');
+    await go('drill-fh-004');
+    await page.getByTestId('pro-card').waitFor();
+    await go('drill-fh-006'); // Pro, but in the child's plan: open to the family
+    await page.getByTestId('drill-title').waitFor();
+    assert.equal(await page.getByTestId('pro-card').count(), 0);
+    await go('drill-fh-003'); // free
+    assert.equal(await page.getByTestId('pro-card').count(), 0);
+    await go('library');
+    assert.ok((await page.getByTestId('pro-locked').count()) > 0, 'locks in the library');
+    await page.selectOption('#access-filter', 'free');
+    assert.equal(await page.locator('[data-drill-id="fh-001"]').count(), 0);
+    await setRole('admin');
+    await go('drill-fh-004');
+    assert.equal(await page.getByTestId('pro-card').count(), 0, 'staff have the academy plan');
+    await go('admin');
+    await page.getByTestId('access-fh-001').click();
+    await page.getByTestId('paywall-toggle').click();
+    assert.equal(await page.getByTestId('paywall-toggle').getAttribute('aria-checked'), 'false');
+  });
+
   await step('matches: record, season statistics and match list from the demo', async () => {
     await setRole('coach');
     await go('matches');

@@ -401,6 +401,7 @@ export function createDemoState(today: string): AppState {
       role: 'coach',
       activePlayerId: DEMO_IDS.player,
       levelDefaults: JSON.parse(JSON.stringify(LEVEL_THRESHOLDS)),
+      paywall: false,
     },
   };
 }

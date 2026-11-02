@@ -9,6 +9,8 @@ export const DRILL_CSV_COLUMNS = [
   'kpi_attempt', 'kpi_decision', 'kpi_execution', 'measurement', 'thresholds', 'progression',
   'regression', 'safety', 'video_url', 'references', 'archived', 'custom', 'updatedAt',
 ] as const;
+/** Written on export but not required on import (files exported before free / Pro existed). */
+const OPTIONAL_CSV_COLUMNS = ['access'] as const;
 
 const SEP = ' | ';
 
@@ -18,9 +20,9 @@ export function drillsToCSV(drills: Drill[]): string {
     d.equipment.join(SEP), d.durationMin, d.repetitions, d.steps.join(SEP), d.cues.join(SEP),
     JSON.stringify(d.mistakes), d.eligibility, d.kpi.attempt, d.kpi.decision, d.kpi.execution,
     d.measurement, JSON.stringify(d.thresholds), d.progression, d.regression, d.safety,
-    d.video.url, d.references.join(SEP), d.archived, d.custom, d.updatedAt,
+    d.video.url, d.references.join(SEP), d.archived, d.custom, d.updatedAt, d.access ?? '',
   ]);
-  return toCSV([[...DRILL_CSV_COLUMNS], ...rows]);
+  return toCSV([[...DRILL_CSV_COLUMNS, ...OPTIONAL_CSV_COLUMNS], ...rows]);
 }
 
 export interface ImportResult {
@@ -39,7 +41,7 @@ export function drillsFromCSV(text: string): ImportResult {
   const header = rows[0].map((h) => h.trim());
   const missing = DRILL_CSV_COLUMNS.filter((c) => !header.includes(c));
   if (missing.length) return { drills: [], errors: [{ row: 1, message: `Missing columns: ${missing.join(', ')}` }] };
-  const col = (r: string[], name: (typeof DRILL_CSV_COLUMNS)[number]) => r[header.indexOf(name)] ?? '';
+  const col = (r: string[], name: (typeof DRILL_CSV_COLUMNS)[number] | (typeof OPTIONAL_CSV_COLUMNS)[number]) => (header.includes(name) ? r[header.indexOf(name)] ?? '' : '');
   rows.slice(1).forEach((r, idx) => {
     const rowNo = idx + 2;
     try {
@@ -71,6 +73,7 @@ export function drillsFromCSV(text: string): ImportResult {
         archived: col(r, 'archived').trim().toLowerCase() === 'true',
         custom: col(r, 'custom').trim().toLowerCase() === 'true',
         updatedAt: col(r, 'updatedAt') || new Date().toISOString(),
+        ...(col(r, 'access').trim() ? { access: col(r, 'access').trim().toLowerCase() } : {}),
       };
       const parsed = DrillSchema.safeParse(candidate);
       if (parsed.success) result.drills.push(parsed.data);

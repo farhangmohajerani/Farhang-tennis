@@ -60,7 +60,10 @@ export function familyDoc(s: AppState, playerId: string): Record<string, unknown
   const goalDrills = tournaments.flatMap((t) => t.goals.flatMap((g) => (g.kind === 'drill' ? [g.drillId] : [])));
   const used = new Set([...plans.flatMap((p) => p.sessions.flatMap((x) => x.items.map((i) => i.drillId))), ...logs.map((l) => l.drillId), ...goalDrills]);
   const drills = s.drills.filter((d) => used.has(d.id) && SEED_JSON.get(d.id) !== JSON.stringify(d));
-  const body = () => ({ player: { ...player, parentIds: [] }, plans, logs, tournaments, matches, drills });
+  // Families cannot read the academy's settings or drill library, so the subscription switch and the
+  // admin's free / Pro choices travel with each family document.
+  const access = Object.fromEntries(s.drills.filter((d) => d.access).map((d) => [d.id, d.access]));
+  const body = () => ({ player: { ...player, parentIds: [] }, plans, logs, tournaments, matches, drills, paywall: s.settings.paywall, access });
   // Stay under the 256 KiB document limit by keeping the newest results and matches.
   while (JSON.stringify(body()).length > FAMILY_BUDGET && (logs.length > 20 || matches.length > 5)) {
     if (logs.length > 20) logs = logs.slice(Math.floor(logs.length / 4));
@@ -110,7 +113,7 @@ export function docsOf(s: AppState): Map<string, Record<string, unknown>> {
   const m = new Map<string, Record<string, unknown>>();
   for (const k of Object.keys(COLLS) as CollKey[]) for (const item of s[k]) m.set(`${COLLS[k].path}/${item.id}`, item as unknown as Record<string, unknown>);
   for (const d of s.drills) if (SEED_JSON.get(d.id) !== JSON.stringify(d)) m.set(`${DRILLS_PATH}/${d.id}`, d as unknown as Record<string, unknown>);
-  m.set(CONFIG_PATH, { levelDefaults: s.settings.levelDefaults });
+  m.set(CONFIG_PATH, { levelDefaults: s.settings.levelDefaults, paywall: s.settings.paywall });
   for (const p of s.players) {
     if (!p.parentIds?.length) continue;
     const doc = familyDoc(s, p.id);
@@ -224,6 +227,7 @@ export class ArtifactDbAdapter implements StorageAdapter {
         role,
         activePlayerId: prefs.activePlayerId ?? '',
         levelDefaults: JSON.parse(JSON.stringify(LEVEL_THRESHOLDS)),
+        paywall: false,
       },
     };
   }
@@ -239,8 +243,12 @@ export class ArtifactDbAdapter implements StorageAdapter {
     const build = (s: AppState): AppState => {
       const out = { ...s, players: [] as AppState['players'], plans: [] as AppState['plans'], logs: [] as AppState['logs'], tournaments: [] as AppState['tournaments'], matches: [] as AppState['matches'] };
       const overrides = new Map<string, z.infer<typeof DrillSchema>>();
+      const access = new Map<string, 'free' | 'pro'>();
+      let paywall = false;
       for (const d of docs) {
         const raw = d.data() ?? {};
+        if (raw.paywall === true) paywall = true;
+        for (const [id, a] of Object.entries((raw.access as Record<string, unknown>) ?? {})) if (a === 'free' || a === 'pro') access.set(id, a);
         const pl = PlayerSchema.safeParse(raw.player);
         if (!pl.success) continue;
         out.players.push(pl.data);
@@ -251,9 +259,13 @@ export class ArtifactDbAdapter implements StorageAdapter {
         for (const x of (raw.drills as unknown[]) ?? []) { const r = DrillSchema.safeParse(x); if (r.success) overrides.set(r.data.id, r.data); }
       }
       out.players.sort((a, b) => a.name.localeCompare(b.name));
-      out.drills = SEED_DRILLS.map((d) => overrides.get(d.id) ?? d);
+      out.drills = SEED_DRILLS.map((d) => {
+        const o = overrides.get(d.id) ?? d;
+        const a = access.get(d.id);
+        return a ? { ...o, access: a } : o;
+      });
       const active = out.players.some((p) => p.id === s.settings.activePlayerId) ? s.settings.activePlayerId : out.players[0]?.id ?? '';
-      return { ...out, settings: { ...out.settings, role: 'parent', activePlayerId: active } };
+      return { ...out, settings: { ...out.settings, role: 'parent', activePlayerId: active, paywall } };
     };
     this.unsubs.push(
       this.db.collection(`${FAMILY}/${this.myId}/players`).onSnapshot(
@@ -363,7 +375,9 @@ export class ArtifactDbAdapter implements StorageAdapter {
     const snap = this.remote.config;
     const defaults = JSON.parse(JSON.stringify(LEVEL_THRESHOLDS)) as Record<Level, Thresholds>;
     let levelDefaults = defaults;
+    let paywall = false;
     if (snap?.exists && !this.pending.has(CONFIG_PATH)) {
+      paywall = snap.data()?.paywall === true;
       const raw = (snap.data()?.levelDefaults ?? {}) as Record<string, unknown>;
       for (const l of Object.keys(defaults) as Level[]) {
         const p = ThresholdsSchema.safeParse(raw[l]);
@@ -373,8 +387,8 @@ export class ArtifactDbAdapter implements StorageAdapter {
       return s;
     }
     // An absent config document means "defaults": record that so nothing is written on load.
-    this.synced.set(CONFIG_PATH, JSON.stringify({ levelDefaults }));
-    return { ...s, settings: { ...s.settings, levelDefaults } };
+    this.synced.set(CONFIG_PATH, JSON.stringify({ levelDefaults, paywall }));
+    return { ...s, settings: { ...s.settings, levelDefaults, paywall } };
   }
 
   /** Diff the state against what the database holds and write only what changed. */

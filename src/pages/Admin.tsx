@@ -10,6 +10,8 @@ import { Badge, Button, Card, ConfirmButton, copyText, cx, downloadText, Empty, 
 import { matchesQuery } from './Library';
 import { supabaseConfig } from '../lib/storage';
 import { TeamPanel } from '../components/TeamPanel';
+import { SubscriptionsPanel } from '../components/SubscriptionsPanel';
+import { drillAccess } from '../lib/access';
 
 export function Admin() {
   const { state, dispatch, t, lang, toast, resetDemo, adapter } = useStore();
@@ -94,6 +96,16 @@ export function Admin() {
                   {d.name}
                 </a>
                 <span className="hidden text-[12px] text-muted sm:inline">{catLabel(lang, d.category)} · {levelLabel(lang, d.level)}</span>
+                <button
+                  type="button"
+                  data-testid={`access-${d.id}`}
+                  aria-pressed={drillAccess(d) === 'pro'}
+                  aria-label={`${t('accessLabel')}: ${d.name}`}
+                  onClick={() => dispatch({ type: 'setDrillAccess', ids: [d.id], access: drillAccess(d) === 'pro' ? 'free' : 'pro' })}
+                  className={cx('min-w-12 rounded-full px-2.5 py-1 text-[12px] font-bold', drillAccess(d) === 'pro' ? 'bg-band text-band-ink' : 'bg-good-soft text-good')}
+                >
+                  {drillAccess(d) === 'pro' ? t('proBadge') : t('freeBadge')}
+                </button>
                 <div className="flex gap-1">
                   <Button size="sm" onClick={() => setEditing(structuredClone(d))} aria-label={`${t('edit')} ${d.name}`}>
                     {t('edit')}
@@ -184,6 +196,8 @@ export function Admin() {
           </Card>
 
           <TeamPanel />
+
+          <SubscriptionsPanel />
 
           <ThresholdEditor />
 
@@ -377,6 +391,7 @@ function DrillEditor({ drill, onClose }: { drill: Drill; onClose: () => void }) 
       archived: f.archived,
       custom: f.custom,
       updatedAt: new Date().toISOString(),
+      ...(f.access ? { access: f.access } : {}),
     };
     const r = DrillSchema.safeParse(candidate);
     if (!r.success) {
@@ -433,6 +448,18 @@ function DrillEditor({ drill, onClose }: { drill: Drill; onClose: () => void }) 
             {LEVELS.map((l) => (
               <option key={l} value={l}>{levelLabel(lang, l)}</option>
             ))}
+          </select>
+        </Field>
+        <Field label={t('accessLabel')} htmlFor="ed-access">
+          <select
+            id="ed-access"
+            className={inputCls}
+            value={f.access ?? ''}
+            onChange={(e) => set('access', (e.target.value || undefined) as Drill['access'])}
+          >
+            <option value="">{t('accessDefault', { x: drillAccess({ ...f, access: undefined }) === 'free' ? t('freeBadge') : t('proBadge') })}</option>
+            <option value="free">{t('freeBadge')}</option>
+            <option value="pro">{t('proBadge')}</option>
           </select>
         </Field>
         {txt('ageSkill', t('ageSkill'))}

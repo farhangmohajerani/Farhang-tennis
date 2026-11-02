@@ -8,10 +8,13 @@ import { playerLogs, stats } from '../lib/selectors';
 import { isOverAttempting } from '../lib/kpi';
 import { Badge, Button, Card, Empty, KpiTile } from '../components/ui';
 import { AddToSession } from '../components/AddToSession';
+import { ProBadge, ProCard } from '../components/Pro';
+import { drillAccess, useAccess } from '../lib/access';
 
 export function DrillDetail({ id }: { id: string }) {
   const { state, t, lang } = useStore();
   const [adding, setAdding] = useState(false);
+  const { paywall, locked } = useAccess();
   const d = state.drills.find((x) => x.id === id);
   const player = activePlayer(state);
   if (!d) {
@@ -41,12 +44,13 @@ export function DrillDetail({ id }: { id: string }) {
             <Badge tone="accent">{catLabel(lang, d.category)}</Badge>
             <Badge>{levelLabel(lang, d.level)}</Badge>
             {d.archived && <Badge tone="warn">{t('archived')}</Badge>}
+            {paywall && drillAccess(d) === 'pro' && <ProBadge locked={locked(d)} />}
             <span className="num font-mono text-[12px] text-muted">{d.id}</span>
           </div>
           <h1 className="font-display text-[34px] leading-[1.05] md:text-[44px]" data-testid="drill-title">{d.name}</h1>
           <p className="mt-2 max-w-[65ch] text-[17px]">{d.objective}</p>
         </div>
-        {canPlan && !d.archived && (
+        {canPlan && !d.archived && !locked(d) && (
           <Button variant="primary" onClick={() => setAdding(true)}>
             + {t('addToSession')}
           </Button>
@@ -60,6 +64,9 @@ export function DrillDetail({ id }: { id: string }) {
         <Fact label={t('ageSkill')} value={d.ageSkill} />
       </dl>
 
+      {locked(d) ? (
+        <ProCard />
+      ) : (
       <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
         <div className="flex min-w-0 flex-col gap-5">
           <Block title={t('setup')}>
@@ -226,6 +233,7 @@ export function DrillDetail({ id }: { id: string }) {
           </Card>
         </div>
       </div>
+      )}
       {adding && <AddToSession drill={d} open={adding} onClose={() => setAdding(false)} />}
     </article>
   );

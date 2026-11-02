@@ -15,6 +15,8 @@ export type Action =
   | { type: 'deleteDrill'; id: string }
   | { type: 'importDrills'; drills: Drill[] }
   | { type: 'setLevelDefaults'; level: Level; thresholds: Thresholds }
+  | { type: 'setPaywall'; on: boolean }
+  | { type: 'setDrillAccess'; ids: string[]; access: 'free' | 'pro' | null }
   | { type: 'applyLevelDefaults'; level: Level }
   | { type: 'savePlan'; plan: Plan }
   | { type: 'deletePlan'; id: string }
@@ -87,6 +89,19 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case 'importDrills':
       return { ...state, drills: mergeDrills(state.drills, action.drills).drills };
+    case 'setPaywall':
+      return { ...state, settings: { ...state.settings, paywall: action.on } };
+    case 'setDrillAccess': {
+      const ids = new Set(action.ids);
+      return {
+        ...state,
+        drills: state.drills.map((d) => {
+          if (!ids.has(d.id)) return d;
+          const { access: _old, ...rest } = d;
+          return action.access ? { ...rest, access: action.access, updatedAt: now() } : { ...rest, updatedAt: now() };
+        }),
+      };
+    }
     case 'setLevelDefaults':
       return { ...state, settings: { ...state.settings, levelDefaults: { ...state.settings.levelDefaults, [action.level]: action.thresholds } } };
     case 'applyLevelDefaults': {

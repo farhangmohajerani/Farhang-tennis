@@ -78,6 +78,11 @@ export const DrillSchema = z.object({
   archived: z.boolean(),
   custom: z.boolean(),
   updatedAt: z.string(),
+  /**
+   * Free or Pro (needs a 21GRAM Tennis plan when subscriptions are on). Unset = the default rule:
+   * beginner drills and the academy's own drills are free. See lib/access.ts.
+   */
+  access: z.enum(['free', 'pro']).optional(),
 });
 export type Drill = z.infer<typeof DrillSchema>;
 
@@ -316,6 +321,8 @@ export const SettingsSchema = z.object({
   role: z.enum(ROLES),
   activePlayerId: z.string(),
   levelDefaults: z.object({ beginner: ThresholdsSchema, intermediate: ThresholdsSchema, advanced: ThresholdsSchema, professional: ThresholdsSchema }),
+  /** Subscriptions on: Pro drills are locked for accounts without a plan (academy-wide, set by the admin). */
+  paywall: z.boolean().default(false),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 

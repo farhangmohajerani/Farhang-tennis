@@ -11,6 +11,7 @@ import { ArtifactDbAdapter, artifactAdapter } from './lib/artifactDb';
 import { SupabaseDocDb, supabaseUser } from './lib/supabaseDb';
 import { roomPairing, rpcPairing, setPairing } from './lib/pairing';
 import { setTeam, type TeamMember } from './lib/team';
+import { setMyPlan } from './lib/access';
 
 async function boot(adapter: StorageAdapter): Promise<AppState> {
   try {
@@ -45,7 +46,7 @@ const fa = (() => {
 })();
 const T = fa
   ? {
-      title: 'پیشرفت تنیس', sub: 'آکادمی تنیس — ورود مربی‌ها و والدین', email: 'ایمیل', pass: 'رمز عبور (حداقل ۸ کاراکتر)',
+      title: '21GRAM Tennis', sub: 'آکادمی تنیس — ورود مربی‌ها و والدین', email: 'ایمیل', pass: 'رمز عبور (حداقل ۸ کاراکتر)',
       signIn: 'ورود', signUp: 'ساخت حساب جدید', forgot: 'رمز را فراموش کرده‌ام', show: 'نمایش رمز', hide: 'پنهان کردن رمز',
       sent: 'ایمیل بازیابی رمز فرستاده شد. روی لینک داخل ایمیل بزنید تا رمز جدید بگذارید.', newPass: 'رمز جدید (حداقل ۸ کاراکتر)',
       newPassTitle: 'رمز جدید بگذارید', save: 'ذخیرهٔ رمز و ورود', toggle: 'English',
@@ -60,10 +61,10 @@ const T = fa
       pickType: 'اول انتخاب کنید مربی هستید یا والدین.',
       pwHint: 'رمز عبور حداقل ۸ کاراکتر',
       pendingTitle: 'درخواست شما فرستاده شد', pendingText: 'حساب مربی شما ساخته شد. مدیر آکادمی باید دسترسی‌تان را تأیید کند. بعد از تأیید، همین صفحه را دوباره باز کنید.',
-      checkAgain: 'دوباره بررسی کن', signOut: 'خروج',
+      checkAgain: 'دوباره بررسی کن', signOut: 'خروج', deleted: 'حساب شما حذف شد.',
     }
   : {
-      title: 'Tennis Progress', sub: 'Tennis academy — sign in for coaches and parents', email: 'Email', pass: 'Password (8+ characters)',
+      title: '21GRAM Tennis', sub: 'Tennis academy — sign in for coaches and parents', email: 'Email', pass: 'Password (8+ characters)',
       signIn: 'Sign in', signUp: 'Create an account', forgot: 'Forgot password', show: 'Show password', hide: 'Hide password',
       sent: 'Password reset email sent. Open the link in it to choose a new password.', newPass: 'New password (8+ characters)',
       newPassTitle: 'Choose a new password', save: 'Save password and continue', toggle: 'فارسی',
@@ -78,7 +79,7 @@ const T = fa
       pickType: 'First choose whether you are a coach or a parent.',
       pwHint: 'Password: at least 8 characters',
       pendingTitle: 'Request sent', pendingText: 'Your coach account is created. The academy admin needs to approve your access. Open this page again once approved.',
-      checkAgain: 'Check again', signOut: 'Sign out',
+      checkAgain: 'Check again', signOut: 'Sign out', deleted: 'Your account has been deleted.',
     };
 
 function friendly(raw: string): string {
@@ -267,11 +268,49 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth) {
     if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
     return res;
   };
+  // The account's own plan (a parent's Family plan). Missing table or no plan = no plan.
+  try {
+    const myId = await user.id();
+    const rows = (await (await rest(`subscriptions?select=plan,expires_at&user_id=eq.${myId}`)).json()) as { plan: 'coach' | 'family'; expires_at: string | null }[];
+    if (rows[0]) setMyPlan({ plan: rows[0].plan, until: rows[0].expires_at });
+  } catch {
+    /* subscriptions not set up */
+  }
   setTeam({
     myEmail: user.email,
     signOut: () => {
       auth.signOut();
       window.location.reload();
+    },
+    async parents(ids) {
+      if (!ids.length) return [];
+      const emails = await db.rpc<{ id: string; email: string }[]>('user_emails', { p_ids: ids });
+      let subs: { user_id: string; plan: 'coach' | 'family'; expires_at: string | null }[] = [];
+      try {
+        subs = (await (await rest('subscriptions?select=user_id,plan,expires_at')).json()) as typeof subs;
+      } catch {
+        /* subscriptions not set up */
+      }
+      return ids.map((id) => {
+        const sub = subs.find((x) => x.user_id === id);
+        return { userId: id, email: emails.find((e) => e.id === id)?.email ?? '', plan: sub ? { plan: sub.plan, until: sub.expires_at } : null };
+      });
+    },
+    async setPlan(userId, plan) {
+      if (!plan) {
+        await rest(`subscriptions?user_id=eq.${userId}`, { method: 'DELETE' });
+        return;
+      }
+      await rest('subscriptions?on_conflict=user_id', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({ user_id: userId, plan: plan.plan, expires_at: plan.until, source: 'manual', updated_at: new Date().toISOString() }),
+      });
+    },
+    async deleteAccount() {
+      await db.rpc('delete_my_account');
+      db.stop();
+      auth.signOut();
     },
     async list() {
       const staff = (await (await rest('staff?select=user_id,email,role&order=email')).json()) as { user_id: string; email: string; role: 'admin' | 'coach' }[];
@@ -335,7 +374,10 @@ const root = createRoot(document.getElementById('root')!);
         root.render(<SignIn auth={auth} onDone={go} />);
       });
     };
-    if (linkError) root.render(<SignIn auth={auth} onDone={go} notice={T.expired} />);
+    const deleted = window.location.hash === '#account-deleted';
+    if (deleted) history.replaceState(null, '', window.location.pathname + window.location.search);
+    if (deleted) root.render(<SignIn auth={auth} onDone={go} notice={T.deleted} />);
+    else if (linkError) root.render(<SignIn auth={auth} onDone={go} notice={T.expired} />);
     else if (fromLink && linkType === 'recovery') root.render(<SignIn auth={auth} onDone={go} screen="recovery" />);
     else if (fromLink && (linkType === 'signup' || linkType === 'invite' || linkType === 'email_change')) root.render(<SignIn auth={auth} onDone={go} screen="welcome" />);
     else if (await auth.refresh()) go();

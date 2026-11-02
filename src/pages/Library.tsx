@@ -5,6 +5,8 @@ import { catLabel, levelLabel } from '../lib/i18n';
 import { href } from '../lib/router';
 import { Badge, Button, cx, Empty, Icon, inputCls, PageHeader } from '../components/ui';
 import { AddToSession } from '../components/AddToSession';
+import { ProBadge } from '../components/Pro';
+import { drillAccess, useAccess } from '../lib/access';
 
 type Dur = 'any' | 'short' | 'mid' | 'long';
 
@@ -25,8 +27,10 @@ export function Library() {
   const [level, setLevel] = useState<Level | 'all'>('all');
   const [dur, setDur] = useState<Dur>('any');
   const [showArchived, setShowArchived] = useState(false);
+  const [access, setAccess] = useState<'all' | 'free' | 'pro'>('all');
   const [adding, setAdding] = useState<Drill | null>(null);
   const canPlan = state.settings.role !== 'parent';
+  const { paywall, locked } = useAccess();
 
   const active = state.drills.filter((d) => showArchived || !d.archived);
   const results = useMemo(
@@ -35,17 +39,18 @@ export function Library() {
         (d) =>
           (cat === 'all' || d.category === cat) &&
           (level === 'all' || d.level === level) &&
+          (access === 'all' || drillAccess(d) === access) &&
           (dur === 'any' || (dur === 'short' && d.durationMin <= 12) || (dur === 'mid' && d.durationMin > 12 && d.durationMin <= 20) || (dur === 'long' && d.durationMin > 20)) &&
           matchesQuery(d, q.trim()),
       ),
-    [active, cat, level, dur, q],
+    [active, cat, level, dur, q, access],
   );
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
     for (const d of active) c[d.category] = (c[d.category] ?? 0) + 1;
     return c;
   }, [active]);
-  const filtered = q || cat !== 'all' || level !== 'all' || dur !== 'any';
+  const filtered = q || cat !== 'all' || level !== 'all' || dur !== 'any' || access !== 'all';
 
   return (
     <div>
@@ -81,12 +86,19 @@ export function Library() {
             <option value="mid">13–20 {t('minutes')}</option>
             <option value="long">&gt; 20 {t('minutes')}</option>
           </select>
+          {paywall && (
+            <select id="access-filter" aria-label={t('accessLabel')} className={cx(inputCls, 'sm:w-44')} value={access} onChange={(e) => setAccess(e.target.value as 'all' | 'free' | 'pro')}>
+              <option value="all">{t('accessLabel')}: {t('all')}</option>
+              <option value="free">{t('freeBadge')}</option>
+              <option value="pro">{t('proBadge')}</option>
+            </select>
+          )}
           <label className="col-span-2 flex items-center gap-2 text-[13px] font-semibold sm:ms-2">
             <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
             {t('showArchived')}
           </label>
           {filtered && (
-            <Button size="sm" variant="ghost" className="col-span-2 sm:ms-auto" onClick={() => { setQ(''); setCat('all'); setLevel('all'); setDur('any'); }}>
+            <Button size="sm" variant="ghost" className="col-span-2 sm:ms-auto" onClick={() => { setQ(''); setCat('all'); setLevel('all'); setDur('any'); setAccess('all'); }}>
               {t('clearFilters')}
             </Button>
           )}
@@ -108,6 +120,7 @@ export function Library() {
                 <Badge>{levelLabel(lang, d.level)}</Badge>
                 {d.archived && <Badge tone="warn">{t('archived')}</Badge>}
                 {d.custom && <Badge tone="band">Custom</Badge>}
+                {paywall && drillAccess(d) === 'pro' && <ProBadge locked={locked(d)} />}
                 <span className="num ms-auto font-mono text-[12px] text-muted">{d.id}</span>
               </div>
               <h3 className="text-[17px] font-bold leading-snug">
@@ -124,7 +137,7 @@ export function Library() {
                 <a href={href(`drill-${d.id}`)} className="inline-flex h-8 items-center rounded-full border border-line px-3 text-[13px] font-semibold hover:border-accent">
                   {t('viewDrill')}
                 </a>
-                {canPlan && !d.archived && (
+                {canPlan && !d.archived && !locked(d) && (
                   <Button size="sm" variant="ghost" onClick={() => setAdding(d)}>
                     + {t('addToSession')}
                   </Button>
