@@ -33,24 +33,34 @@ begin
   end if;
 end $$;
 
--- Delete the signed-in account (App Store rule 5.1.1(v)). Removes the person's family copies and
--- their link to players; the academy keeps its own training records. The last admin cannot leave.
+-- Delete the signed-in account (App Store rule 5.1.1(v)). A family account takes its player and
+-- everything recorded for that player with it; a coach takes the players they added without an
+-- account (and their records). Connected families keep their own data. The last admin cannot leave.
 create or replace function public.delete_my_account() returns void
 language plpgsql security definer set search_path = '' as $$
 declare v_uid uuid := (select auth.uid());
+        v_me text;
 begin
   if v_uid is null then raise exception 'not signed in'; end if;
+  v_me := v_uid::text;
   if exists (select 1 from public.staff where user_id = v_uid and role = 'admin')
      and (select count(*) from public.staff where role = 'admin') <= 1 then
     raise exception 'last_admin';
   end if;
-  delete from public.docs where path like 'family/' || v_uid::text || '/%';
+  delete from public.docs d
+   where d.path = 'academy/data/players/' || v_me
+      or (d.path ~ '^academy/data/(plans|logs|tournaments|matches)/' and (
+            d.data ->> 'playerId' = v_me
+            or d.data ->> 'playerId' in (select split_part(o.path, '/', 4) from public.docs o
+                                         where o.path like 'academy/data/players/%' and o.data ->> 'ownerId' = v_me)))
+      or (d.path like 'academy/data/players/%' and d.data ->> 'ownerId' = v_me)
+      or d.path like 'family/' || v_me || '/%';
+  -- Older links (parents following a player) go too.
   update public.docs
      set data = jsonb_set(data, '{parentIds}', coalesce(
-           (select jsonb_agg(x) from jsonb_array_elements(data -> 'parentIds') x where x <> to_jsonb(v_uid::text)),
-           '[]'::jsonb))
-   where path like 'academy/data/players/%' and data -> 'parentIds' ? v_uid::text;
-  -- staff, staff_requests, pair_codes and subscriptions go with the user (on delete cascade).
+           (select jsonb_agg(x) from jsonb_array_elements(data -> 'parentIds') x where x <> to_jsonb(v_me)), '[]'::jsonb))
+   where path like 'academy/data/players/%' and data -> 'parentIds' ? v_me;
+  -- Profile, connections, staff role, plan and codes go with the account (on delete cascade).
   delete from auth.users where id = v_uid;
 end $$;
 

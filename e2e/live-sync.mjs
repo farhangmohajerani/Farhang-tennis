@@ -29,9 +29,12 @@ async function person(viewport = { width: 820, height: 1180 }) {
   await page.goto(URL_);
   return page;
 }
-async function signUp(page, email, kind) {
+async function signUp(page, { email, kind, username, name, year }) {
   await page.getByTestId('tab-up').click();
   await page.getByTestId(`kind-${kind}`).click();
+  await page.fill('#sb-username', username);
+  await page.fill('#sb-name', name);
+  if (year) await page.fill('#sb-birthyear', String(year));
   await page.fill('#sb-email', email);
   await page.fill('#sb-password', 'password123');
   await page.getByTestId('sign-up').click();
@@ -87,22 +90,18 @@ async function sameBoard(scorer, follower, label) {
   }
 }
 
+// "owner" here is a coach (not the admin): the database's connection rules decide what each side sees.
 const owner = await person();
-await step('setup: admin, player Alya, a parent connected with the coach code', async () => {
-  await signUp(owner, OWNER, 'coach');
-  await owner.locator('[id^="pl-name-"]').fill('Alya');
-  await owner.getByTestId('save-player').click();
-  await owner.getByText('Build a 10-session plan').waitFor();
-  await owner.getByTestId('open-connect-parent').click();
-  await owner.getByTestId('tab-invite').click();
-  await owner.waitForFunction(() => /^\d{6}$/.test(document.querySelector('[data-testid="invite-code"]')?.textContent?.trim() ?? ''));
-  const code = (await owner.getByTestId('invite-code').innerText()).trim();
-  await owner.keyboard.press('Escape');
+await step('setup: a coach and the family of Alya connect by username', async () => {
+  await signUp(owner, { email: 'coach@example.com', kind: 'coach', username: 'hamed', name: 'Hamed Coach' });
   globalThis.fam = await person({ width: 390, height: 844 });
-  await signUp(fam, 'parent@example.com', 'parent');
-  await fam.locator('#coach-code').fill(code);
-  await fam.getByTestId('coach-code-submit').click();
-  await fam.getByTestId('parent-connect').waitFor({ state: 'detached', timeout: 10000 });
+  await signUp(fam, { email: 'parent@example.com', kind: 'parent', username: 'alya', name: 'Alya', year: 2013 });
+  await fam.getByTestId('find-coach-card').getByTestId('people-search-input').fill('hamed');
+  await fam.getByTestId('request-hamed').click();
+  await owner.reload();
+  await owner.getByTestId('accept-alya').click();
+  await owner.getByText('Build a 10-session plan').waitFor({ timeout: 15000 });
+  assert.equal(mock.staff.size, 0, 'neither is the admin');
 });
 
 const delays = [];

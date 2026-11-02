@@ -10,6 +10,7 @@ import { Badge, Button, Card, ConfirmButton, copyText, cx, downloadText, Empty, 
 import { matchesQuery } from './Library';
 import { supabaseConfig } from '../lib/storage';
 import { TeamPanel } from '../components/TeamPanel';
+import { MembersPanel } from '../components/Social';
 import { SubscriptionsPanel } from '../components/SubscriptionsPanel';
 import { drillAccess } from '../lib/access';
 
@@ -195,7 +196,7 @@ export function Admin() {
             )}
           </Card>
 
-          <TeamPanel />
+          {adapter.social ? <MembersPanel /> : <TeamPanel />}
 
           <SubscriptionsPanel />
 

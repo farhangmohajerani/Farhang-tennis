@@ -9,6 +9,8 @@ import { Badge, Card, Empty, Icon, KpiTile, PageHeader, SectionTitle } from '../
 import { PlayerForm } from '../components/Players';
 import { ParentConnect } from '../components/ParentLink';
 import { CoachRequestsBanner } from '../components/TeamPanel';
+import { FindCoachCard, FindPlayersCard, IncomingRequestsCard } from '../components/Social';
+import { getSocial } from '../lib/social';
 import { daysBetween, matchesOfPlayer } from '../lib/competition';
 import { ResultBadge, scoreLine, useCanChart } from '../components/MatchBits';
 
@@ -54,6 +56,23 @@ export function Dashboard() {
   const player = activePlayer(state);
   if (!player) {
     const canAdd = state.settings.role !== 'parent' && adapter.canWrite !== false;
+    if (adapter.social) {
+      // Usernames mode: coaches find their players (or add one without an account).
+      return (
+        <div>
+          <PageHeader eyebrow={t('appName')} title={t('welcomeName', { name: getSocial()?.me.displayName ?? '' })} />
+          <IncomingRequestsCard />
+          {adapter.maxRole === 'parent' ? <FindCoachCard /> : <FindPlayersCard />}
+          {canAdd && (
+            <Card className="max-w-2xl p-5">
+              <SectionTitle>{t('addOfflinePlayer')}</SectionTitle>
+              <p className="-mt-1 mb-3 text-[13px] text-muted">{t('offlineHelp')}</p>
+              <PlayerForm />
+            </Card>
+          )}
+        </div>
+      );
+    }
     if (adapter.kind === 'artifact' && adapter.maxRole === 'parent') {
       return (
         <div className="py-6">
@@ -93,6 +112,8 @@ export function Dashboard() {
     <div>
       <PageHeader eyebrow={plan?.name} title={t('nav_dashboard')} />
       <CoachRequestsBanner />
+      <IncomingRequestsCard />
+      {state.settings.role === 'parent' && <FindCoachCard />}
 
       <div className="grid gap-5 lg:grid-cols-[1.5fr_1fr]">
         <Card className="overflow-hidden">

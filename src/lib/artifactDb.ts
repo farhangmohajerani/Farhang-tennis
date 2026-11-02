@@ -108,12 +108,13 @@ function writePrefs(s: AppState['settings']) {
   }
 }
 
-/** Documents (path → body) that represent this state. */
-export function docsOf(s: AppState): Map<string, Record<string, unknown>> {
+/** Documents (path → body) that represent this state. Usernames mode has no family copies. */
+export function docsOf(s: AppState, family = true): Map<string, Record<string, unknown>> {
   const m = new Map<string, Record<string, unknown>>();
   for (const k of Object.keys(COLLS) as CollKey[]) for (const item of s[k]) m.set(`${COLLS[k].path}/${item.id}`, item as unknown as Record<string, unknown>);
   for (const d of s.drills) if (SEED_JSON.get(d.id) !== JSON.stringify(d)) m.set(`${DRILLS_PATH}/${d.id}`, d as unknown as Record<string, unknown>);
   m.set(CONFIG_PATH, { levelDefaults: s.settings.levelDefaults, paywall: s.settings.paywall });
+  if (!family) return m;
   for (const p of s.players) {
     if (!p.parentIds?.length) continue;
     const doc = familyDoc(s, p.id);
@@ -165,6 +166,13 @@ export class ArtifactDbAdapter implements StorageAdapter {
 
   /** Set on Supabase: parents may then chart their own child's matches. */
   familyWriter: FamilyWriter | null = null;
+  /**
+   * Supabase with usernames (supabase/social.sql): the database shows each person only the players
+   * they are connected to, so families read the same documents as coaches and no family copies exist.
+   */
+  social = false;
+  /** A change the database refused (usernames mode): reported once, then the remote version returns. */
+  private softError: string | null = null;
   get canChart(): boolean {
     return this.maxRole === 'parent' && !!this.familyWriter && !!this.myId;
   }
@@ -181,7 +189,7 @@ export class ArtifactDbAdapter implements StorageAdapter {
     this.maxRole = owner ? 'admin' : editor ? 'coach' : 'parent';
     this.canWrite = owner || editor;
     this.myId = myId;
-    if (this.maxRole === 'parent') return this.loadParent();
+    if (this.maxRole === 'parent' && !this.social) return this.loadParent();
 
     let resolveInit!: () => void;
     const init = new Promise<void>((r) => (resolveInit = r));
@@ -223,7 +231,7 @@ export class ArtifactDbAdapter implements StorageAdapter {
     );
     await Promise.race([init, sleep(12000)]);
 
-    let state: AppState = this.baseState('coach');
+    let state: AppState = this.baseState(this.maxRole === 'parent' ? 'parent' : 'coach');
     state.settings.role = (() => {
       const r = readPrefs().role;
       return r && ROLE_RANK[r] <= ROLE_RANK[this.maxRole] ? r : this.maxRole;
@@ -421,10 +429,11 @@ export class ArtifactDbAdapter implements StorageAdapter {
         if (l) out.push(l);
         continue;
       }
-      const parsed = schema.safeParse(d.data());
-      if (!parsed.success) {
-        // A document this version cannot read (e.g. written by a newer version) is left alone:
-        // forgetting it here means saving never deletes or overwrites it.
+      const raw = d.data();
+      const parsed = schema.safeParse(raw);
+      // A document this version cannot read (e.g. written by a newer version), or a player linked into
+      // a family account (archived), is left alone: forgetting it here means saving never touches it.
+      if (!parsed.success || (k === 'players' && raw?.archived === true)) {
         this.synced.delete(path);
         continue;
       }
@@ -439,9 +448,12 @@ export class ArtifactDbAdapter implements StorageAdapter {
     if (k === 'logs') (out as { date: string; createdAt: string }[]).sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
     if (k === 'players') (out as { name: string }[]).sort((a, b) => a.name.localeCompare(b.name));
     if (k === 'tournaments') (out as { start: string }[]).sort((a, b) => a.start.localeCompare(b.start));
-    if (k === 'matches') (out as { date: string; createdAt: string }[]).sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
-    const next = { ...s, [k]: out } as AppState;
-    if (k === 'players') {
+    let items = out;
+    // A family's own charted matches: this device's newer version stays until it is saved.
+    if (k === 'matches' && this.maxRole === 'parent' && this.canChart) items = this.mergeMine(out as Match[], s.matches);
+    if (k === 'matches') (items as { date: string; createdAt: string }[]).sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
+    const next = { ...s, [k]: items } as AppState;
+    if (k === 'players' && !this.social) {
       for (const p of next.players) for (const parent of p.parentIds ?? []) {
         const fp = familyPath(parent, p.id);
         if (!this.synced.has(fp) && !this.pending.has(fp)) this.synced.set(fp, UNKNOWN);
@@ -503,7 +515,7 @@ export class ArtifactDbAdapter implements StorageAdapter {
     writePrefs(state.settings);
     if (this.maxRole === 'parent') return this.saveFamilyMatches(state);
     if (!this.canWrite) return Promise.resolve();
-    const next = docsOf(state);
+    const next = docsOf(state, !this.social);
     for (const [path, body] of next) {
       const json = JSON.stringify(body);
       if (this.synced.get(path) !== json) this.enqueue(path, { kind: 'set', body: JSON.parse(json) }, json);
@@ -512,7 +524,24 @@ export class ArtifactDbAdapter implements StorageAdapter {
     if (this.fatal) return Promise.reject(new Error(this.fatal));
     if (!this.queue.size && !this.running) return Promise.resolve();
     void this.run();
-    return new Promise((resolve, reject) => this.drained.push(() => (this.fatal ? reject(new Error(this.fatal)) : resolve())));
+    return new Promise((resolve, reject) =>
+      this.drained.push(() => {
+        if (this.fatal) return reject(new Error(this.fatal));
+        const soft = this.softError;
+        this.softError = null;
+        if (soft) reject(new Error(soft));
+        else resolve();
+      }),
+    );
+  }
+
+  /**
+   * Write order matters when the database checks access through the player: a new player is saved
+   * before its plans and results, and a deleted player only after them.
+   */
+  private static rank(path: string, op: Op): number {
+    if (!path.startsWith(COLLS.players.path + '/')) return 1;
+    return op.kind === 'set' ? 0 : 2;
   }
 
   private enqueue(path: string, op: Op, json: string | null) {
@@ -530,7 +559,9 @@ export class ArtifactDbAdapter implements StorageAdapter {
     this.running = true;
     try {
       while (this.queue.size) {
-        const batch = [...this.queue.entries()].slice(0, 4);
+        const entries = [...this.queue.entries()];
+        const first = Math.min(...entries.map(([p, it]) => ArtifactDbAdapter.rank(p, it.op)));
+        const batch = entries.filter(([p, it]) => ArtifactDbAdapter.rank(p, it.op) === first).slice(0, 4);
         for (const [p] of batch) this.queue.delete(p);
         await Promise.all(batch.map(([path, item]) => this.write(path, item)));
       }
@@ -557,6 +588,15 @@ export class ArtifactDbAdapter implements StorageAdapter {
           continue;
         }
         if (this.pending.get(path) === item.v) this.pending.delete(path);
+        if (this.social && code === 'invalid_argument') {
+          // Usernames mode: e.g. the player is no longer connected. Only this change is dropped and the
+          // database's version comes back; everything else keeps saving.
+          console.warn('write refused', path, e);
+          this.softError = 'This change was not saved: you no longer have access to this player.';
+          const k = (Object.keys(COLLS) as CollKey[]).find((key) => path.startsWith(COLLS[key].path + '/'));
+          if (k) setTimeout(() => this.applyColl(k), 0);
+          return;
+        }
         this.fatal =
           code === 'quota_exceeded'
             ? 'The shared database is full. Delete old results or contact the academy owner.'

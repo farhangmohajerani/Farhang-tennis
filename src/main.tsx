@@ -1,4 +1,4 @@
-import { StrictMode, useState } from 'react';
+import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 import { App } from './App';
@@ -9,9 +9,10 @@ import { LocalStorageAdapter, MemoryAdapter, SupabaseAuth, supabaseConfig, type 
 import type { AppState } from './types';
 import { ArtifactDbAdapter, artifactAdapter } from './lib/artifactDb';
 import { SupabaseDocDb, supabaseUser } from './lib/supabaseDb';
-import { roomPairing, rpcPairing, setPairing } from './lib/pairing';
+import { roomPairing, setPairing } from './lib/pairing';
 import { setTeam, type TeamMember } from './lib/team';
 import { setMyPlan } from './lib/access';
+import { cleanUsername, setSocial, USERNAME_RE, type Connection, type Member, type SearchHit, type Social } from './lib/social';
 
 async function boot(adapter: StorageAdapter): Promise<AppState> {
   try {
@@ -46,7 +47,7 @@ const fa = (() => {
 })();
 const T = fa
   ? {
-      title: '21GRAM Tennis', sub: 'آکادمی تنیس — ورود مربی‌ها و والدین', email: 'ایمیل', pass: 'رمز عبور (حداقل ۸ کاراکتر)',
+      title: '21GRAM Tennis', sub: 'ورود مربی‌ها و خانواده‌ها', email: 'ایمیل', pass: 'رمز عبور (حداقل ۸ کاراکتر)',
       signIn: 'ورود', signUp: 'ساخت حساب جدید', forgot: 'رمز را فراموش کرده‌ام', show: 'نمایش رمز', hide: 'پنهان کردن رمز',
       sent: 'ایمیل بازیابی رمز فرستاده شد. روی لینک داخل ایمیل بزنید تا رمز جدید بگذارید.', newPass: 'رمز جدید (حداقل ۸ کاراکتر)',
       newPassTitle: 'رمز جدید بگذارید', save: 'ذخیرهٔ رمز و ورود', toggle: 'English',
@@ -56,17 +57,19 @@ const T = fa
       exists: 'با این ایمیل قبلاً حساب ساخته شده. «ورود» را بزنید.', notConfirmed: 'ایمیل هنوز تأیید نشده. روی لینک ایمیل تأیید بزنید.',
       expired: 'این لینک منقضی شده یا قبلاً استفاده شده. دوباره «رمز را فراموش کرده‌ام» را بزنید یا وارد شوید.',
       tooMany: 'تعداد درخواست‌ها زیاد بود. چند دقیقه صبر کنید و دوباره امتحان کنید.', passwordSaved: 'رمز ذخیره شد.',
-      tabSignIn: 'ورود', tabSignUp: 'ساخت حساب', whoAreYou: 'شما کدام هستید؟', coach: 'مربی', parent: 'والدین / خانواده',
-      coachHint: 'با همان ایمیلی که دعوت شده‌اید ثبت‌نام کنید؛ بعد کد دعوت ۶ رقمی را وارد می‌کنید. کد ندارید؟ مدیر آکادمی دسترسی‌تان را تأیید می‌کند.', parentHint: 'بعد از ثبت‌نام، کدی را که مربی داده وارد می‌کنید (یا کد خودتان را به مربی می‌دهید).',
-      pickType: 'اول انتخاب کنید مربی هستید یا والدین.',
+      tabSignIn: 'ورود', tabSignUp: 'ساخت حساب', whoAreYou: 'شما کدام هستید؟', coach: 'مربی', parent: 'خانواده / بازیکن',
+      coachHint: 'بعد از ورود، بازیکن‌هایتان را با نام کاربری‌شان پیدا می‌کنید و برایشان درخواست می‌فرستید.', parentHint: 'یک حساب برای یک بازیکن. بعد از ورود، مربی‌تان را با نام کاربری‌اش پیدا می‌کنید و درخواست می‌فرستید.',
+      pickType: 'اول انتخاب کنید مربی هستید یا خانواده.',
       pwHint: 'رمز عبور حداقل ۸ کاراکتر',
-      pendingTitle: 'کد ندارید؟ درخواست شما فرستاده شد', pendingText: 'مدیر آکادمی درخواست شما را می‌بیند و تأیید می‌کند. بعد از تأیید، «دوباره بررسی کن» را بزنید.',
-      codeTitle: 'کد دعوت مربی', codeHelp: 'کد ۶ رقمی‌ای را که مدیر آکادمی برایتان فرستاده بنویسید (با همان ایمیلی که دعوت شده بود ثبت‌نام کرده باشید).', codeSubmit: 'ورود',
-      codeInvalid: 'این کد درست نیست یا برای این ایمیل نیست. کد و ایمیل را با مدیر چک کنید.', codeTooMany: 'کدهای اشتباه زیاد شد. یک ساعت دیگر دوباره امتحان کنید.', codeFailed: 'اتصال برقرار نشد. اینترنت را چک کنید و دوباره امتحان کنید.',
-      checkAgain: 'دوباره بررسی کن', signOut: 'خروج', deleted: 'حساب شما حذف شد.',
+      username: 'نام کاربری', usernameHint: 'حروف کوچک انگلیسی، عدد، نقطه یا _ — ۳ تا ۲۴ کاراکتر. مثلاً yaman',
+      yourName: 'نام شما', playerName: 'نام بازیکن', birthYear: 'سال تولد بازیکن (میلادی)', badYear: 'سال تولد درست نیست.',
+      setupTitle: 'نام کاربری خود را بسازید', setupText: 'مربی‌ها و خانواده‌ها همدیگر را با نام کاربری پیدا می‌کنند و به هم متصل می‌شوند.',
+      available: 'آزاد است ✓', taken: 'این نام کاربری قبلاً گرفته شده؛ یکی دیگر بنویسید.', checking: 'در حال بررسی…',
+      setupSave: 'ذخیره و ادامه', setupFailed: 'ذخیره نشد. اینترنت را چک کنید و دوباره امتحان کنید.', adminCoach: 'حساب مدیر به‌عنوان مربی هم کار می‌کند.',
+      signOut: 'خروج', deleted: 'حساب شما حذف شد.',
     }
   : {
-      title: '21GRAM Tennis', sub: 'Tennis academy — sign in for coaches and parents', email: 'Email', pass: 'Password (8+ characters)',
+      title: '21GRAM Tennis', sub: 'Sign in for coaches and families', email: 'Email', pass: 'Password (8+ characters)',
       signIn: 'Sign in', signUp: 'Create an account', forgot: 'Forgot password', show: 'Show password', hide: 'Hide password',
       sent: 'Password reset email sent. Open the link in it to choose a new password.', newPass: 'New password (8+ characters)',
       newPassTitle: 'Choose a new password', save: 'Save password and continue', toggle: 'فارسی',
@@ -76,14 +79,16 @@ const T = fa
       exists: 'An account with this email already exists. Tap “Sign in”.', notConfirmed: 'Your email is not confirmed yet. Open the link in the confirmation email.',
       expired: 'This link has expired or was already used. Tap “Forgot password” again, or sign in.',
       tooMany: 'Too many attempts. Wait a few minutes and try again.', passwordSaved: 'Password saved.',
-      tabSignIn: 'Sign in', tabSignUp: 'Create account', whoAreYou: 'Who are you?', coach: 'Coach', parent: 'Parent / family',
-      coachHint: 'Sign up with the email you were invited with, then type your 6-digit invite code. No code? The academy admin approves your access.', parentHint: 'After signing up, type the code your coach gave you (or give the coach your own code).',
-      pickType: 'First choose whether you are a coach or a parent.',
+      tabSignIn: 'Sign in', tabSignUp: 'Create account', whoAreYou: 'Who are you?', coach: 'Coach', parent: 'Family / player',
+      coachHint: 'After signing up, find your players by their username and send them a request.', parentHint: 'One account per player. After signing up, find your coach by their username and send a request.',
+      pickType: 'First choose: coach or family.',
       pwHint: 'Password: at least 8 characters',
-      pendingTitle: 'No code? Your request is sent', pendingText: 'The academy admin sees your request and approves it. Once approved, tap “Check again”.',
-      codeTitle: 'Coach invite code', codeHelp: 'Type the 6-digit code the academy admin sent you (you must have signed up with the invited email).', codeSubmit: 'Enter',
-      codeInvalid: 'This code is not right, or it is not for this email. Check the code and the email with the admin.', codeTooMany: 'Too many wrong codes. Try again in an hour.', codeFailed: 'Could not connect. Check the internet and try again.',
-      checkAgain: 'Check again', signOut: 'Sign out', deleted: 'Your account has been deleted.',
+      username: 'Username', usernameHint: 'Lowercase English letters, digits, . or _ — 3 to 24 characters. For example: yaman',
+      yourName: 'Your name', playerName: "Player's name", birthYear: "Player's birth year", badYear: 'That birth year does not look right.',
+      setupTitle: 'Create your username', setupText: 'Coaches and families find each other by username and connect.',
+      available: 'Available ✓', taken: 'This username is taken — choose another.', checking: 'Checking…',
+      setupSave: 'Save and continue', setupFailed: 'Could not save. Check the internet and try again.', adminCoach: 'The admin account also works as a coach.',
+      signOut: 'Sign out', deleted: 'Your account has been deleted.',
     };
 
 function friendly(raw: string): string {
@@ -101,6 +106,9 @@ function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: Su
   const [screen] = useState<Screen>(initial);
   const [mode, setMode] = useState<'in' | 'up'>('in');
   const [kind, setKind] = useState<'coach' | 'parent' | null>(null);
+  const [username, setUsername] = useState('');
+  const [name, setName] = useState('');
+  const [year, setYear] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
@@ -184,16 +192,19 @@ function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: Su
               {kind && <p className="text-[13px] text-muted">{kind === 'coach' ? T.coachHint : T.parentHint}</p>}
             </fieldset>
           )}
+          {mode === 'up' && kind && <ProfileFields kind={kind === 'coach' ? 'coach' : 'family'} username={username} setUsername={setUsername} name={name} setName={setName} year={year} setYear={setYear} />}
           <form
             className="flex flex-col gap-3"
             onSubmit={(e) => {
               e.preventDefault();
               if (mode === 'in') void run(() => auth.signIn(email.trim(), password), onDone);
               else if (!kind) setMsg({ text: T.pickType, bad: true });
+              else if (!profileOk(kind === 'coach' ? 'coach' : 'family', username, name, year)) setMsg({ text: T.usernameHint, bad: true });
               else
                 void run(async () => {
+                  const profile = { username, displayName: name.trim(), birthYear: kind === 'parent' && year ? Number(year) : null };
                   try {
-                    await auth.signUp(email.trim(), password, kind);
+                    await auth.signUp(email.trim(), password, kind, profile);
                   } catch (e) {
                     // Accounts are confirmed automatically on the server; sign straight in.
                     if (/confirm/i.test(e instanceof Error ? e.message : String(e))) await auth.signIn(email.trim(), password);
@@ -210,7 +221,14 @@ function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: Su
             {mode === 'in' ? (
               <button type="submit" disabled={busy || !email || !password} className={primary} data-testid="sign-in">{T.signIn}</button>
             ) : (
-              <button type="submit" disabled={busy || !email || password.length < 8} className={primary} data-testid="sign-up">{T.signUp}</button>
+              <button
+                type="submit"
+                disabled={busy || !email || password.length < 8 || !kind || !profileOk(kind === 'coach' ? 'coach' : 'family', username, name, year)}
+                className={primary}
+                data-testid="sign-up"
+              >
+                {T.signUp}
+              </button>
             )}
             {mode === 'in' && (
               <button type="button" disabled={busy || !email} className="text-sm font-semibold text-accent disabled:opacity-40" data-testid="forgot" onClick={() => void run(() => auth.resetPassword(email.trim()), () => setMsg({ text: T.sent, bad: false }))}>
@@ -239,81 +257,223 @@ function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: Su
   );
 }
 
-function PendingCoach({ email, onSignOut, claim }: { email: string; onSignOut: () => void; claim: (code: string) => Promise<{ role?: string; error?: string }> }) {
-  const [code, setCode] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState('');
-  const submit = async () => {
-    setBusy(true);
-    setMsg('');
-    try {
-      const r = await claim(code.trim());
-      if (r?.role) return window.location.reload();
-      setMsg(r?.error === 'too_many_attempts' ? T.codeTooMany : T.codeInvalid);
-    } catch (e) {
-      void e;
-      setMsg(T.codeFailed);
-    } finally {
-      setBusy(false);
-    }
-  };
+const thisYear = new Date().getFullYear();
+const yearOk = (y: string) => !y || (/^\d{4}$/.test(y) && Number(y) >= thisYear - 90 && Number(y) <= thisYear - 3);
+function profileOk(kind: 'coach' | 'family', username: string, name: string, year: string) {
+  return USERNAME_RE.test(username) && name.trim().length >= 2 && name.trim().length <= 60 && (kind === 'coach' || yearOk(year));
+}
+
+const fieldCls = 'w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-ink';
+
+/** Username, name and (for a family) the player's birth year: at sign-up and on the profile screen. */
+function ProfileFields({
+  kind, username, setUsername, name, setName, year, setYear, status,
+}: {
+  kind: 'coach' | 'family'; username: string; setUsername: (v: string) => void; name: string; setName: (v: string) => void;
+  year: string; setYear: (v: string) => void; status?: 'checking' | 'available' | 'taken' | null;
+}) {
+  const badName = username.length > 0 && !USERNAME_RE.test(username);
   return (
-    <div className="gutter mx-auto flex min-h-[100dvh] max-w-sm flex-col justify-center gap-4" dir={fa ? 'rtl' : 'ltr'} data-testid="pending-coach">
-      <h1 className="font-display text-4xl">{T.title}</h1>
-      <form
-        className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-5"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void submit();
-        }}
-        data-testid="staff-code-form"
-      >
-        <h2 className="font-display text-2xl">{T.codeTitle}</h2>
-        <p className="text-sm text-muted">{T.codeHelp}</p>
-        <div className="flex gap-2">
+    <div className="flex flex-col gap-3">
+      <label className="flex flex-col gap-1 text-sm font-semibold">
+        {T.username}
+        <span className="flex items-center rounded-xl border border-line bg-surface ps-3 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent" dir="ltr">
+          <span className="text-muted">@</span>
           <input
-            id="staff-code"
-            inputMode="numeric"
-            autoComplete="off"
-            dir="ltr"
-            placeholder="······"
-            aria-label={T.codeTitle}
-            className="h-12 min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 text-center font-mono text-2xl tracking-[0.3em]"
-            value={code}
-            onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            id="sb-username"
+            className="min-w-0 flex-1 bg-transparent px-1 py-2.5 font-normal text-ink"
+            style={{ outline: 'none' }}
+            value={username}
+            onChange={(e) => setUsername(cleanUsername(e.target.value))}
+            autoCapitalize="none"
+            autoCorrect="off"
+            autoComplete="username"
+            spellCheck={false}
+            placeholder="yaman"
           />
-          <button type="submit" disabled={busy || code.length !== 6} className="h-12 rounded-full bg-accent px-5 font-semibold text-accent-ink disabled:opacity-40" data-testid="staff-code-submit">
-            {busy ? '…' : T.codeSubmit}
-          </button>
-        </div>
-        {msg && <p className="text-sm font-semibold text-bad" role="alert" data-testid="staff-code-msg">{msg}</p>}
-      </form>
-      <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-5">
-        <h2 className="font-display text-2xl">{T.pendingTitle}</h2>
-        <p>{T.pendingText}</p>
-        <p className="text-sm text-muted" dir="ltr">{email}</p>
-        <button type="button" className="h-11 rounded-full bg-accent font-semibold text-accent-ink" onClick={() => window.location.reload()}>{T.checkAgain}</button>
-        <button type="button" className="h-11 rounded-full border border-line font-semibold" onClick={onSignOut}>{T.signOut}</button>
-      </div>
+        </span>
+        <span className={`text-[13px] font-normal ${badName || status === 'taken' ? 'font-semibold text-bad' : status === 'available' ? 'font-semibold text-good' : 'text-muted'}`} data-testid="username-hint">
+          {status === 'taken' ? T.taken : status === 'available' ? T.available : status === 'checking' ? T.checking : T.usernameHint}
+        </span>
+      </label>
+      <label className="flex flex-col gap-1 text-sm font-semibold">
+        {kind === 'coach' ? T.yourName : T.playerName}
+        <input id="sb-name" className={`${fieldCls} font-normal`} value={name} maxLength={60} onChange={(e) => setName(e.target.value)} autoComplete="name" dir="auto" />
+      </label>
+      {kind === 'family' && (
+        <label className="flex flex-col gap-1 text-sm font-semibold">
+          {T.birthYear}
+          <input
+            id="sb-birthyear"
+            className={`${fieldCls} font-normal`}
+            inputMode="numeric"
+            value={year}
+            onChange={(e) => setYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
+            placeholder={String(thisYear - 12)}
+            dir="ltr"
+          />
+          {year.length === 4 && !yearOk(year) && <span className="text-[13px] font-semibold text-bad">{T.badYear}</span>}
+        </label>
+      )}
     </div>
   );
 }
 
-async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth) {
+type RegisterResult = { ok?: boolean; error?: string } | null;
+
+/** First sign-in without a profile (or the username was taken at sign-up): choose it here. */
+function ProfileSetup({
+  initial, fixedKind, error, register, available, onDone, onSignOut,
+}: {
+  initial: { kind: 'coach' | 'family' | null; username: string; displayName: string; birthYear: number | null };
+  fixedKind: 'coach' | null;
+  error: string;
+  register: (p: { kind: 'coach' | 'family'; username: string; displayName: string; birthYear: number | null }) => Promise<RegisterResult>;
+  available: (u: string) => Promise<boolean>;
+  onDone: () => void;
+  onSignOut: () => void;
+}) {
+  const [kind, setKind] = useState<'coach' | 'family' | null>(fixedKind ?? initial.kind);
+  const [username, setUsername] = useState(cleanUsername(initial.username));
+  const [name, setName] = useState(initial.displayName);
+  const [year, setYear] = useState(initial.birthYear ? String(initial.birthYear) : '');
+  const [status, setStatus] = useState<'checking' | 'available' | 'taken' | null>(error === 'username_taken' ? 'taken' : null);
+  const [msg, setMsg] = useState(error && error !== 'username_taken' ? T.setupFailed : '');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!USERNAME_RE.test(username)) return setStatus(null);
+    setStatus('checking');
+    let live = true;
+    const timer = setTimeout(() => {
+      available(username)
+        .then((ok) => live && setStatus(ok ? 'available' : 'taken'))
+        .catch(() => live && setStatus(null));
+    }, 350);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [username, available]);
+  const ok = !!kind && profileOk(kind, username, name, year) && status !== 'taken';
+  return (
+    <div className="gutter mx-auto flex min-h-[100dvh] max-w-sm flex-col justify-center gap-4" dir={fa ? 'rtl' : 'ltr'} data-testid="profile-setup">
+      <h1 className="font-display text-4xl">{T.title}</h1>
+      <form
+        className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-5"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!ok || !kind) return;
+          setBusy(true);
+          setMsg('');
+          try {
+            const r = await register({ kind, username, displayName: name.trim(), birthYear: kind === 'family' && year ? Number(year) : null });
+            if (r?.ok || r?.error === 'exists') return onDone();
+            if (r?.error === 'username_taken') setStatus('taken');
+            else setMsg(T.setupFailed);
+          } catch {
+            setMsg(T.setupFailed);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <h2 className="font-display text-2xl">{T.setupTitle}</h2>
+        <p className="text-sm text-muted">{T.setupText}</p>
+        {fixedKind ? (
+          <p className="rounded-xl bg-accent-soft px-3 py-2 text-[13px] font-semibold">🎾 {T.coach} — {T.adminCoach}</p>
+        ) : (
+          <fieldset className="grid grid-cols-2 gap-2">
+            <legend className="mb-1 text-sm font-semibold">{T.whoAreYou}</legend>
+            {(['coach', 'family'] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                aria-pressed={kind === k}
+                data-testid={`setup-kind-${k}`}
+                onClick={() => setKind(k)}
+                className={kind === k ? 'rounded-2xl border-2 border-accent bg-accent-soft p-3 text-start' : 'rounded-2xl border-2 border-line bg-surface p-3 text-start'}
+              >
+                <span className="block text-2xl" aria-hidden="true">{k === 'coach' ? '🎾' : '👨‍👩‍👧'}</span>
+                <span className="block font-semibold">{k === 'coach' ? T.coach : T.parent}</span>
+              </button>
+            ))}
+          </fieldset>
+        )}
+        {kind && <ProfileFields kind={kind} username={username} setUsername={setUsername} name={name} setName={setName} year={year} setYear={setYear} status={status} />}
+        {msg && <p className="text-sm font-semibold text-bad" role="alert">{msg}</p>}
+        <button type="submit" disabled={busy || !ok} className="h-11 rounded-full bg-accent font-semibold text-accent-ink disabled:opacity-40" data-testid="setup-save">
+          {busy ? '…' : T.setupSave}
+        </button>
+        <button type="button" className="text-sm font-semibold text-muted underline" onClick={onSignOut}>
+          {T.signOut}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+interface RawHit { username: string; display_name: string; kind: 'coach' | 'family'; status: SearchHit['status']; direction: SearchHit['direction'] }
+interface RawConn { username: string; display_name: string; kind: 'coach' | 'family'; status: Connection['status']; direction: Connection['direction']; player_id: string; since: string }
+interface RawMember { user_id: string; username: string; display_name: string; kind: 'coach' | 'family'; email: string; created_at: string; connections: number }
+
+async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth, restart: () => void) {
   const db = new SupabaseDocDb(cfg, auth);
-  const user = await supabaseUser(db, auth);
-  if (user.pendingCoach) {
-    db.stop();
-    root.render(
-      <PendingCoach
-        email={user.email}
-        onSignOut={() => { auth.signOut(); window.location.reload(); }}
-        claim={(code) => db.rpc<{ role?: string; error?: string }>('claim_staff_code', { p_code: code })}
-      />,
-    );
-    return;
+  let user = await supabaseUser(db, auth);
+  if (!user.profile) {
+    // Everyone has a username (supabase/social.sql). The admin's account works as a coach.
+    const fixedKind = user.role ? 'coach' : null;
+    const typed = auth.signupProfile();
+    const register = (x: { kind: 'coach' | 'family'; username: string; displayName: string; birthYear: number | null }) =>
+      db.rpc<RegisterResult>('register_profile', { p_username: x.username, p_display_name: x.displayName, p_kind: x.kind, p_birth_year: x.birthYear });
+    let error = '';
+    const kind = fixedKind ?? typed.kind;
+    if (kind && USERNAME_RE.test(typed.username) && typed.displayName.trim()) {
+      // Typed at sign-up: save it now.
+      const r = await register({ kind, username: typed.username, displayName: typed.displayName, birthYear: typed.birthYear ?? null }).catch((): RegisterResult => ({ error: 'failed' }));
+      if (r?.ok || r?.error === 'exists') user = await supabaseUser(db, auth);
+      else error = r?.error ?? 'failed';
+    }
+    if (!user.profile) {
+      db.stop();
+      root.render(
+        <ProfileSetup
+          initial={{ ...typed, kind: fixedKind ?? typed.kind, birthYear: typed.birthYear ?? null }}
+          fixedKind={fixedKind}
+          error={error}
+          register={register}
+          available={(u) => db.rpc<boolean>('username_available', { p_username: u })}
+          onDone={restart}
+          onSignOut={() => {
+            auth.signOut();
+            window.location.reload();
+          }}
+        />,
+      );
+      return;
+    }
   }
-  setPairing(rpcPairing((fn, args) => db.rpc(fn, args), () => void db.poll()));
+  const profile = user.profile!;
+  const social: Social = {
+    me: profile,
+    async search(q) {
+      const rows = (await db.rpc<RawHit[]>('search_profiles', { p_query: q })) ?? [];
+      return rows.map((h) => ({ username: h.username, displayName: h.display_name, kind: h.kind, status: h.status ?? null, direction: h.direction ?? null }));
+    },
+    async connections() {
+      const rows = (await db.rpc<RawConn[]>('my_connections')) ?? [];
+      return rows.map((c) => ({ username: c.username, displayName: c.display_name, kind: c.kind, status: c.status, direction: c.direction, playerId: c.player_id, since: c.since }));
+    },
+    send: (u) => db.rpc('send_request', { p_username: u }),
+    respond: (u, accept) => db.rpc('respond_request', { p_username: u, p_accept: accept }),
+    remove: (u) => db.rpc('remove_connection', { p_username: u }),
+    merge: (id, u) => db.rpc('merge_offline_player', { p_offline: id, p_username: u }),
+    async members() {
+      const rows = (await db.rpc<RawMember[]>('admin_profiles')) ?? [];
+      return rows.map((m): Member => ({ userId: m.user_id, username: m.username, displayName: m.display_name, kind: m.kind, email: m.email, createdAt: m.created_at, connections: m.connections }));
+    },
+    refresh: () => void db.poll(),
+  };
+  setSocial(social);
   const rest = async (path: string, init: RequestInit = {}) => {
     const s = await auth.refresh();
     const res = await fetch(`${cfg.url}/rest/v1/${path}`, {
@@ -400,8 +560,9 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth) {
       else await rest(`staff?user_id=eq.${m.userId}`, { method: 'DELETE' });
     },
   });
-  const adapter = new ArtifactDbAdapter(db, user, `Shared academy database (Supabase) — saved for all coaches; parents see only their own child`);
-  // Parents chart their own child's matches through a checked database function (supabase/family-matches.sql).
+  const adapter = new ArtifactDbAdapter(db, user, `Online (Supabase) — each coach sees their connected players, each family their own player`);
+  adapter.social = true;
+  // Families chart their own player's matches through a checked database function (supabase/social.sql).
   adapter.familyWriter = { save: (match) => db.rpc('family_save_match', { p_match: match }) };
   render(await adapter.load(), adapter);
 }
@@ -430,7 +591,7 @@ const root = createRoot(document.getElementById('root')!);
     const fromLink = auth.fromUrl();
     const go = () => {
       if (authHash && /(access_token|error|type)=/.test(window.location.hash)) window.location.hash = '';
-      void startSupabase(cfg, auth).catch((e) => {
+      void startSupabase(cfg, auth, go).catch((e) => {
         console.error(e);
         root.render(<SignIn auth={auth} onDone={go} />);
       });

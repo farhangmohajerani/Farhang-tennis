@@ -19,6 +19,8 @@ export interface StorageAdapter {
   setFastSync?(on: boolean): void;
   /** This viewer's user id in shared mode (who is charting a match). */
   myId?: string | null;
+  /** Supabase with usernames: coaches see connected players and their own; families their own player. */
+  social?: boolean;
   /** A parent who may chart the live score of their own child's matches (Supabase). */
   readonly canChart?: boolean;
   /** Human-readable description shown in the UI so demo storage is never mistaken for production. */
@@ -116,6 +118,12 @@ export function supabaseConfig(): SupabaseConfig | null {
   return url && anonKey ? { url: url.replace(/\/$/, ''), anonKey } : null;
 }
 
+export interface SignupProfile {
+  username: string;
+  displayName: string;
+  birthYear?: number | null;
+}
+
 export class SupabaseAuth {
   constructor(private cfg: SupabaseConfig) {}
 
@@ -160,21 +168,42 @@ export class SupabaseAuth {
     return window.location.origin + window.location.pathname;
   }
 
-  signUp(email: string, password: string, accountType: 'coach' | 'parent' = 'parent') {
-    return this.call(`signup?redirect_to=${encodeURIComponent(SupabaseAuth.appUrl())}`, { email, password, data: { account_type: accountType } });
+  /** The username, name and kind typed at sign-up travel with the account until the profile is saved. */
+  signUp(email: string, password: string, accountType: 'coach' | 'parent' = 'parent', profile?: SignupProfile) {
+    return this.call(`signup?redirect_to=${encodeURIComponent(SupabaseAuth.appUrl())}`, {
+      email,
+      password,
+      data: { account_type: accountType, ...(profile ? { username: profile.username, display_name: profile.displayName, birth_year: profile.birthYear ?? null } : {}) },
+    });
+  }
+
+  private metadata(): Record<string, unknown> | null {
+    const s = this.current();
+    if (!s) return null;
+    try {
+      const payload = JSON.parse(decodeURIComponent(escape(atob(s.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))));
+      return (payload.user_metadata ?? null) as Record<string, unknown> | null;
+    } catch {
+      return null;
+    }
   }
 
   /** account_type chosen at sign-up (from the token's user_metadata). */
   accountType(): 'coach' | 'parent' | null {
-    const s = this.current();
-    if (!s) return null;
-    try {
-      const payload = JSON.parse(atob(s.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-      const t = payload.user_metadata?.account_type;
-      return t === 'coach' || t === 'parent' ? t : null;
-    } catch {
-      return null;
-    }
+    const t = this.metadata()?.account_type;
+    return t === 'coach' || t === 'parent' ? t : null;
+  }
+
+  /** What was typed at sign-up, if anything. */
+  signupProfile(): SignupProfile & { kind: 'coach' | 'family' | null } {
+    const m = this.metadata() ?? {};
+    const t = this.accountType();
+    return {
+      kind: t === 'coach' ? 'coach' : t === 'parent' ? 'family' : null,
+      username: typeof m.username === 'string' ? m.username : '',
+      displayName: typeof m.display_name === 'string' ? m.display_name : '',
+      birthYear: typeof m.birth_year === 'number' ? m.birth_year : null,
+    };
   }
 
   private inflight: Promise<SupabaseSession | null> | null = null;

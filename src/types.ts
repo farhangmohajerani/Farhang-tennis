@@ -101,6 +101,12 @@ export const PlayerSchema = z.object({
   /** claude.ai user ids of parents who may follow this player (read-only). */
   parentIds: z.array(z.string()).default([]),
   goals: z.string(),
+  /** Supabase: the family account this player is (its id is the account id). */
+  accountId: z.string().optional(),
+  /** Supabase: that account's username. */
+  username: z.string().optional(),
+  /** Supabase: the coach who added this player without an account (only they see it). */
+  ownerId: z.string().optional(),
 });
 export type Player = z.infer<typeof PlayerSchema>;
 

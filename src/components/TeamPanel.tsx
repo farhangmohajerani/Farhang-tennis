@@ -126,13 +126,14 @@ export function TeamPanel() {
 
 /** Admin: a notice on the dashboard when coaches are waiting for approval. */
 export function CoachRequestsBanner() {
-  const { t, state } = useStore();
+  const { t, state, adapter } = useStore();
   const team = getTeam();
   const [n, setN] = useState(0);
   useEffect(() => {
-    if (!team || state.settings.role !== 'admin') return;
+    // Usernames mode has no coach approvals: coaches sign up freely.
+    if (!team || adapter.social || state.settings.role !== 'admin') return;
     team.list().then((ms) => setN(ms.filter((m) => m.requested).length)).catch(() => undefined);
-  }, [team, state.settings.role]);
+  }, [team, adapter.social, state.settings.role]);
   if (!n) return null;
   return (
     <a href="#admin" className="mb-4 flex items-center gap-2 rounded-2xl border border-warn bg-warn-soft p-3 text-sm font-semibold text-warn" data-testid="requests-banner">

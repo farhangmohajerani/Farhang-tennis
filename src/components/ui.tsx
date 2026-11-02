@@ -46,8 +46,12 @@ export function ConfirmButton({ label, confirmLabel, onConfirm, variant = 'dange
   );
 }
 
-export function Card({ children, className, as: As = 'section' }: { children: ReactNode; className?: string; as?: 'section' | 'div' | 'article' }) {
-  return <As className={cx('rounded-2xl border border-line bg-surface', className)}>{children}</As>;
+export function Card({ children, className, as: As = 'section', 'data-testid': testId }: { children: ReactNode; className?: string; as?: 'section' | 'div' | 'article'; 'data-testid'?: string }) {
+  return (
+    <As className={cx('rounded-2xl border border-line bg-surface', className)} data-testid={testId}>
+      {children}
+    </As>
+  );
 }
 
 export function Badge({ children, tone = 'neutral', className }: { children: ReactNode; tone?: 'neutral' | 'accent' | 'good' | 'warn' | 'bad' | 'band'; className?: string }) {
@@ -195,11 +199,14 @@ export function Toasts() {
 export function Modal({ open, onClose, title, children, wide }: { open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  // The latest onClose, so a parent re-render (a new inline function) does not move the focus again.
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close.current();
     window.addEventListener('keydown', onKey);
     const box = ref.current;
     (box?.querySelector<HTMLElement>('[data-autofocus]') ?? box?.querySelector<HTMLElement>('input,select,textarea,button'))?.focus();
@@ -207,7 +214,7 @@ export function Modal({ open, onClose, title, children, wide }: { open: boolean;
       document.body.style.overflow = prev;
       window.removeEventListener('keydown', onKey);
     };
-  }, [open, onClose]);
+  }, [open]);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-band/60 md:items-center" onClick={onClose}>

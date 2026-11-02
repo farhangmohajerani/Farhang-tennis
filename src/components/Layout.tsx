@@ -10,6 +10,8 @@ import { ConnectCoachModal, ConnectParentModal } from './ParentLink';
 import { getPairing } from '../lib/pairing';
 import { currentBuild, reloadTo, useNewVersion } from '../lib/update';
 import { getTeam } from '../lib/team';
+import { getSocial } from '../lib/social';
+import { CoachesModal, useIncomingCount } from './Social';
 
 export const NAV: { name: string; key: DictKey; roles: Role[] }[] = [
   { name: 'dashboard', key: 'nav_dashboard', roles: ['parent', 'coach', 'admin'] },
@@ -33,14 +35,24 @@ export function Layout({ route, children }: { route: string; children: ReactNode
   const [playersOpen, setPlayersOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
   const [coachOpen, setCoachOpen] = useState(false);
+  const [coachesOpen, setCoachesOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [changingPw, setChangingPw] = useState(false);
   const rank: Record<Role, number> = { parent: 0, coach: 1, admin: 2 };
   const roles = ROLES.filter((r) => !adapter.maxRole || rank[r] <= rank[adapter.maxRole]);
   const canManage = role !== 'parent' && adapter.canWrite !== false;
   const shared = adapter.kind === 'artifact';
+  // Usernames mode (Supabase): coaches and families connect by username instead of codes.
+  const social = adapter.social ? getSocial() : null;
+  const requests = useIncomingCount();
   // A signed-in parent (not a coach previewing the parent view) can add a child with the coach's code.
-  const canConnectCoach = shared && adapter.maxRole === 'parent' && !!getPairing()?.redeem;
+  const canConnectCoach = shared && !social && adapter.maxRole === 'parent' && !!getPairing()?.redeem;
+  const isFamily = !!social && social.me.kind === 'family' && adapter.maxRole === 'parent';
+  const countBadge = requests > 0 && (
+    <span className="num ms-1 inline-flex min-w-5 items-center justify-center rounded-full bg-bad px-1.5 text-[11px] font-bold text-white" data-testid="requests-count">
+      {requests}
+    </span>
+  );
   const newVersion = useNewVersion();
   const build = currentBuild();
 
@@ -120,12 +132,36 @@ export function Layout({ route, children }: { route: string; children: ReactNode
                 {t('age', { n: new Date().getFullYear() - player.birthYear })} · {player.hand === 'right' ? 'RH' : 'LH'} · {player.backhand === 'two' ? '2HBH' : '1HBH'}
               </span>
             )}
-            {canManage && (
+            {canManage && social && (
+              <button
+                type="button"
+                className="inline-flex h-8 items-center gap-1 rounded-full bg-accent px-3 text-[13px] font-semibold text-accent-ink hover:brightness-110"
+                onClick={() => setPlayersOpen(true)}
+                data-testid="open-people"
+              >
+                <span aria-hidden="true">👥</span>
+                {t('playersBtn')}
+                {countBadge}
+              </button>
+            )}
+            {isFamily && (
+              <button
+                type="button"
+                className="inline-flex h-8 items-center gap-1 rounded-full bg-accent px-3 text-[13px] font-semibold text-accent-ink hover:brightness-110"
+                onClick={() => setCoachesOpen(true)}
+                data-testid="open-coaches"
+              >
+                <span aria-hidden="true">🎾</span>
+                {t('coachesBtn')}
+                {countBadge}
+              </button>
+            )}
+            {canManage && !social && (
               <button type="button" className="font-semibold text-accent" onClick={() => setPlayersOpen(true)} data-testid="manage-players">
                 {t('managePlayers')}
               </button>
             )}
-            {canManage && shared && state.players.length > 0 && (
+            {canManage && shared && !social && state.players.length > 0 && (
               <button
                 type="button"
                 className="inline-flex h-8 items-center gap-1 rounded-full bg-accent px-3 text-[13px] font-semibold text-accent-ink hover:brightness-110"
@@ -148,7 +184,7 @@ export function Layout({ route, children }: { route: string; children: ReactNode
               </button>
             )}
             <span className={cx('ms-auto rounded-full px-2 py-0.5 text-[11px] font-bold', shared ? 'bg-good-soft text-good' : 'bg-warn-soft text-warn')} title={adapter.label}>
-              {shared ? t('sharedBadge') : adapter.kind === 'supabase' ? 'Supabase' : t('demoBanner')}
+              {social ? t('onlineBadge') : shared ? t('sharedBadge') : adapter.kind === 'supabase' ? 'Supabase' : t('demoBanner')}
             </span>
           </div>
         </div>
@@ -156,6 +192,7 @@ export function Layout({ route, children }: { route: string; children: ReactNode
       {playersOpen && <PlayersModal open={playersOpen} onClose={() => setPlayersOpen(false)} />}
       {connectOpen && <ConnectParentModal onClose={() => setConnectOpen(false)} />}
       {coachOpen && <ConnectCoachModal onClose={() => setCoachOpen(false)} />}
+      {coachesOpen && <CoachesModal onClose={() => setCoachesOpen(false)} />}
       {deleting && <DeleteAccountModal onClose={() => setDeleting(false)} />}
       {changingPw && <ChangePasswordModal onClose={() => setChangingPw(false)} />}
 
@@ -164,7 +201,7 @@ export function Layout({ route, children }: { route: string; children: ReactNode
       <footer className="gutter mx-auto w-full max-w-6xl pb-28 text-[12px] text-muted md:pb-8">
         <div className="court-rule mb-3" />
         <p>
-          <strong>{t('storage')}:</strong> {adapter.label}.{' '}
+          <strong>{t('storage')}:</strong> {social ? t('storageSocial') : adapter.label}.{' '}
           <span data-testid="save-status">
             {saveStatus === 'saving' && '…'}
             {saveStatus === 'saved' && `✓ ${t('saved')}`}
@@ -173,6 +210,11 @@ export function Layout({ route, children }: { route: string; children: ReactNode
                   {getTeam() && (
             <span className="ms-2 inline-flex flex-wrap items-center gap-2">
               · {t('signedInAs', { email: getTeam()!.myEmail })}
+              {social && (
+                <bdi dir="ltr" className="font-mono" data-testid="footer-username">
+                  @{social.me.username}
+                </bdi>
+              )}
               <button type="button" className="font-semibold text-accent" onClick={() => getTeam()!.signOut()} data-testid="sign-out">
                 {t('signOutBtn')}
               </button>

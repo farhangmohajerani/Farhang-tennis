@@ -15,7 +15,11 @@ export function SubscriptionsPanel() {
   const paywall = state.settings.paywall;
   const active = state.drills.filter((d) => !d.archived);
   const free = active.filter((d) => drillAccess(d) === 'free').length;
-  const parentIds = useMemo(() => [...new Set(state.players.flatMap((p) => p.parentIds ?? []))].sort(), [state.players]);
+  // Usernames mode: each family account is its player (accountId); earlier: parents linked to players.
+  const parentIds = useMemo(
+    () => [...new Set(state.players.flatMap((p) => (p.accountId ? [p.accountId] : p.parentIds ?? [])))].sort(),
+    [state.players],
+  );
   const [parents, setParents] = useState<ParentAccount[] | null>(null);
   const [busy, setBusy] = useState('');
   const key = parentIds.join(',');
@@ -87,7 +91,7 @@ export function SubscriptionsPanel() {
           ) : (
             <ul className="mt-3 flex flex-col divide-y divide-line">
               {parents.map((p) => {
-                const kids = state.players.filter((x) => x.parentIds?.includes(p.userId)).map((x) => x.name);
+                const kids = state.players.filter((x) => x.accountId === p.userId || x.parentIds?.includes(p.userId)).map((x) => x.name);
                 return (
                   <li key={p.userId} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2.5" data-parent={p.userId}>
                     <div className="min-w-0 flex-1">
