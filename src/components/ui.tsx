@@ -201,7 +201,8 @@ export function Modal({ open, onClose, title, children, wide }: { open: boolean;
     document.body.style.overflow = 'hidden';
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
-    ref.current?.querySelector<HTMLElement>('input,select,textarea,button')?.focus();
+    const box = ref.current;
+    (box?.querySelector<HTMLElement>('[data-autofocus]') ?? box?.querySelector<HTMLElement>('input,select,textarea,button'))?.focus();
     return () => {
       document.body.style.overflow = prev;
       window.removeEventListener('keydown', onKey);

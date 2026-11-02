@@ -62,6 +62,8 @@ async function run(engineName) {
     assert.match(await page.getByTestId('next-session-title').innerText(), /Session \d+/);
     assert.match(await page.getByTestId('plan-progress').innerText(), /of 10 sessions completed/);
     assert.equal(await page.locator('[data-kpi]').count(), 3);
+    // On-device demo: there is no parent pairing, so the button must not promise it.
+    assert.equal(await page.getByTestId('open-connect-parent').count(), 0);
   });
 
   await step('library shows all 200 seeded drills', async () => {

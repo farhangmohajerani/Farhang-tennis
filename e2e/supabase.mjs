@@ -84,20 +84,27 @@ await step('a parent signs up, sees only a connection code', async () => {
   code = (await parent.getByTestId('pair-code').innerText()).trim();
   assert.ok(!(await parent.locator('body').innerText()).includes('Alya'));
 });
-await step('coach connects the parent with the code (parent page need not be open)', async () => {
+await step('coach connects the parent from the top-bar button (parent page need not be open)', async () => {
   await parent.close();
   await coach.goto(URL_ + '#dashboard');
-  await coach.getByTestId('manage-players').click();
-  const btn = coach.locator('[data-testid^="parents-"]').first();
-  await btn.click();
-  await coach.locator('[id^="pair-"]').first().fill('111111');
-  await coach.locator('[data-testid^="connect-parent-"]').first().click();
+  await coach.getByTestId('open-connect-parent').click();
+  await coach.getByTestId('connect-parent-modal').waitFor();
+  assert.equal(await coach.evaluate(() => document.activeElement?.id), 'connect-code');
+  // A code pasted with spaces, as people often send it, still gives all six digits.
+  await coach.locator('#connect-code').fill(' 111 111 ');
+  assert.equal(await coach.locator('#connect-code').inputValue(), '111111');
+  await coach.getByTestId('connect-parent-submit').click();
   await coach.getByText(/No parent account has this code/).waitFor();
-  await coach.locator('[id^="pair-"]').first().fill(code);
-  await coach.locator('[data-testid^="connect-parent-"]').first().click();
+  await coach.locator('#connect-code').fill(code);
+  await coach.getByTestId('connect-parent-submit').click();
   await coach.getByText(/Parent connected to Alya/).waitFor();
-  await coach.getByText('parent@example.com').waitFor();
+  await coach.getByTestId('connect-parent-modal').getByText('parent@example.com').waitFor();
+  assert.equal(await coach.locator('#connect-code').inputValue(), '');
   assert.ok([...mock.docs.keys()].some((k) => k.startsWith('family/')));
+  await coach.keyboard.press('Escape');
+  await coach.getByTestId('manage-players').click();
+  await coach.locator('[data-testid^="parents-"]').first().getByText(/Connect parent · 1/).waitFor();
+  await coach.keyboard.press('Escape');
 });
 await step('parent signs in again and follows Alya read-only', async () => {
   const p2 = await person();

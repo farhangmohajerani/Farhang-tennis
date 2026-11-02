@@ -6,6 +6,7 @@ import { roleKey, type DictKey } from '../lib/i18n';
 import { activePlayer } from '../lib/reducer';
 import { Button, cx, Icon, inputCls, Modal, Toasts } from './ui';
 import { PlayersModal } from './Players';
+import { ConnectParentModal } from './ParentLink';
 import { getTeam } from '../lib/team';
 
 export const NAV: { name: string; key: DictKey; roles: Role[] }[] = [
@@ -28,6 +29,7 @@ export function Layout({ route, children }: { route: string; children: ReactNode
   const mobileItems = role === 'parent' ? items : items.filter((n) => n.name !== 'parent');
   const activeName = route === 'drill' ? 'library' : ['tournaments', 'match', 'newmatch', 'tournament'].includes(route) ? 'matches' : route;
   const [playersOpen, setPlayersOpen] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const rank: Record<Role, number> = { parent: 0, coach: 1, admin: 2 };
   const roles = ROLES.filter((r) => !adapter.maxRole || rank[r] <= rank[adapter.maxRole]);
@@ -115,6 +117,17 @@ export function Layout({ route, children }: { route: string; children: ReactNode
                 {t('managePlayers')}
               </button>
             )}
+            {canManage && shared && state.players.length > 0 && (
+              <button
+                type="button"
+                className="inline-flex h-8 items-center gap-1 rounded-full bg-accent px-3 text-[13px] font-semibold text-accent-ink hover:brightness-110"
+                onClick={() => setConnectOpen(true)}
+                data-testid="open-connect-parent"
+              >
+                <span aria-hidden="true">🔗</span>
+                {t('connectParentBtn')}
+              </button>
+            )}
             <span className={cx('ms-auto rounded-full px-2 py-0.5 text-[11px] font-bold', shared ? 'bg-good-soft text-good' : 'bg-warn-soft text-warn')} title={adapter.label}>
               {shared ? t('sharedBadge') : adapter.kind === 'supabase' ? 'Supabase' : t('demoBanner')}
             </span>
@@ -122,6 +135,7 @@ export function Layout({ route, children }: { route: string; children: ReactNode
         </div>
       )}
       {playersOpen && <PlayersModal open={playersOpen} onClose={() => setPlayersOpen(false)} />}
+      {connectOpen && <ConnectParentModal onClose={() => setConnectOpen(false)} />}
       {deleting && <DeleteAccountModal onClose={() => setDeleting(false)} />}
 
       <main className="gutter mx-auto w-full max-w-6xl flex-1 pb-28 md:pb-12">{children}</main>

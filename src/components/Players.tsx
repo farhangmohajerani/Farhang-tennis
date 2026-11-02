@@ -102,8 +102,16 @@ export function PlayersModal({ open, onClose }: { open: boolean; onClose: () => 
               </button>
               {p.id === state.settings.activePlayerId && <Badge tone="accent">✓</Badge>}
               {adapter.kind === 'artifact' && (
-                <Button size="sm" variant="ghost" onClick={() => setParentsOf(parentsOf === p.id ? null : p.id)} data-testid={`parents-${p.id}`}>
-                  {t('role_parent')} · {(p.parentIds ?? []).length}
+                <Button
+                  size="sm"
+                  variant={parentsOf === p.id ? 'primary' : 'secondary'}
+                  aria-expanded={parentsOf === p.id}
+                  onClick={() => setParentsOf(parentsOf === p.id ? null : p.id)}
+                  data-testid={`parents-${p.id}`}
+                >
+                  <span aria-hidden="true">🔗</span>
+                  {t('connectParentBtn')}
+                  {(p.parentIds ?? []).length > 0 && ` · ${(p.parentIds ?? []).length}`}
                 </Button>
               )}
               <Button size="sm" onClick={() => setEditing(p.id)}>{t('edit')}</Button>
