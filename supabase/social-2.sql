@@ -41,6 +41,7 @@ create table if not exists public.link_requests (
 );
 create unique index if not exists link_requests_one_open on public.link_requests (offline_id) where status = 'pending';
 create index if not exists link_requests_family_idx on public.link_requests (family_id);
+create index if not exists link_requests_coach_idx on public.link_requests (coach_id);
 alter table public.link_requests enable row level security;
 
 create table if not exists public.push_subscriptions (
@@ -62,6 +63,7 @@ create table if not exists public.match_notifications (
   sent_by uuid references auth.users (id) on delete set null,
   sent_at timestamptz not null default now()
 );
+create index if not exists match_notifications_sent_by_idx on public.match_notifications (sent_by);
 alter table public.match_notifications enable row level security;
 
 -- Keys the notify Edge Function keeps for itself: its Web Push (VAPID) key pair, made there on first use
