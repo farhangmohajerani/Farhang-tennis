@@ -89,7 +89,7 @@ export function Dashboard() {
             <PlayerForm />
           </Card>
         ) : (
-          <Empty>{t('noUpcoming')}</Empty>
+          <Empty>{t(state.settings.role === 'parent' ? 'noUpcomingFamily' : 'noUpcoming')}</Empty>
         )}
       </div>
     );
@@ -132,7 +132,7 @@ export function Dashboard() {
               </>
             ) : (
               <div className="flex flex-wrap items-center gap-3">
-                <p>{sessions.length ? t('noUpcoming') : t('noPlanYet')}</p>
+                <p>{sessions.length ? t(isCoach ? 'noUpcoming' : 'noUpcomingFamily') : t('noPlanYet')}</p>
                 {isCoach && (
                   <a href={href('planner')} className="inline-flex h-10 items-center rounded-full bg-accent px-4 text-sm font-semibold text-accent-ink">
                     {t('buildPlan')} →
@@ -256,7 +256,7 @@ export function Dashboard() {
               })}
             </ul>
           ) : (
-            <Empty>{t('noUpcoming')}</Empty>
+            <Empty>{t(state.settings.role === 'parent' ? 'noUpcomingFamily' : 'noUpcoming')}</Empty>
           )}
         </section>
         <section>

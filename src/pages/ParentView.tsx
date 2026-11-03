@@ -113,7 +113,7 @@ export function ParentView() {
 
       <SectionTitle>{t('calendar')}</SectionTitle>
       {!plan ? (
-        <Empty>{t('noUpcoming')}</Empty>
+        <Empty>{t(state.settings.role === 'parent' ? 'noUpcomingFamily' : 'noUpcoming')}</Empty>
       ) : (
         <ol className="relative flex flex-col gap-3 border-s-2 border-line ps-5" data-testid="parent-calendar">
           {plan.sessions.map((s) => {
