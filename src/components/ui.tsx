@@ -46,6 +46,37 @@ export function ConfirmButton({ label, confirmLabel, onConfirm, variant = 'dange
   );
 }
 
+/** An on/off setting (role="switch"); the label text toggles it too. */
+export function Switch({
+  checked, onChange, label, hint, disabled, 'data-testid': testId,
+}: { checked: boolean; onChange: (v: boolean) => void; label: ReactNode; hint?: ReactNode; disabled?: boolean; 'data-testid'?: string }) {
+  return (
+    <label className={cx('flex items-start justify-between gap-4 py-2.5', disabled ? 'cursor-not-allowed' : 'cursor-pointer')}>
+      <span className="min-w-0">
+        <span className="block text-[15px] font-semibold leading-snug">{label}</span>
+        {hint && <span className="mt-0.5 block text-[12.5px] leading-snug text-muted">{hint}</span>}
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        data-testid={testId}
+        className={cx('relative mt-0.5 inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors', checked ? 'bg-accent' : 'bg-line', disabled && 'opacity-40')}
+      >
+        <span
+          aria-hidden="true"
+          className={cx(
+            'inline-block h-6 w-6 rounded-full bg-white shadow transition-transform',
+            checked ? 'translate-x-[22px] rtl:-translate-x-[22px]' : 'translate-x-0.5 rtl:-translate-x-0.5',
+          )}
+        />
+      </button>
+    </label>
+  );
+}
+
 export function Card({ children, className, as: As = 'section', 'data-testid': testId }: { children: ReactNode; className?: string; as?: 'section' | 'div' | 'article'; 'data-testid'?: string }) {
   return (
     <As className={cx('rounded-2xl border border-line bg-surface', className)} data-testid={testId}>

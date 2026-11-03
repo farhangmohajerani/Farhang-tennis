@@ -1,16 +1,18 @@
+import { useState } from 'react';
 import { useStore } from '../lib/store';
-import { KPI_KEYS } from '../types';
+import { KPI_KEYS, type Match } from '../types';
 import { formatDate, type DictKey } from '../lib/i18n';
 import { href } from '../lib/router';
-import { activePlayer, drillMap, primaryPlan } from '../lib/reducer';
+import { activePlayer, drillMap } from '../lib/reducer';
 import { playerLogs, stats } from '../lib/selectors';
 import { findConflicts, todayISO } from '../lib/schedule';
 import { Badge, Card, Empty, Icon, KpiTile, PageHeader, SectionTitle } from '../components/ui';
 import { PlayerForm } from '../components/Players';
 import { ParentConnect } from '../components/ParentLink';
 import { CoachRequestsBanner } from '../components/TeamPanel';
-import { FindCoachCard, FindPlayersCard, IncomingRequestsCard } from '../components/Social';
+import { CoachesModal, FindCoachCard, FindPlayersCard, Handle, IncomingRequestsCard, useMe, useSocialState, VerifiedBadge } from '../components/Social';
 import { getSocial } from '../lib/social';
+import { Guide, NotifyPrompt, PlanSwitcher, usePlanChoice } from '../components/Onboarding';
 import { daysBetween, matchesOfPlayer } from '../lib/competition';
 import { LiveElsewhere, ResultBadge, scoreLine, useCanChart } from '../components/MatchBits';
 
@@ -51,9 +53,152 @@ function MatchesCard({ playerId }: { playerId: string }) {
   );
 }
 
+/** A live match, big: the one thing a family wants to see first. */
+function LiveCard({ m, name }: { m: Match; name: string }) {
+  const { t } = useStore();
+  return (
+    <a href={href(`match-${m.id}`)} className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border-2 border-bad bg-bad-soft p-4" data-testid={`live-card-${m.id}`}>
+      <span className="relative flex h-3 w-3 shrink-0" aria-hidden="true">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-bad opacity-60" />
+        <span className="relative inline-flex h-3 w-3 rounded-full bg-bad" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[12px] font-bold uppercase tracking-wide text-bad">{t('live')}</p>
+        <p className="font-semibold">
+          {name} · {t('vsName', { name: m.opponent || t('opponent') })}
+        </p>
+      </div>
+      <span className="num font-mono text-xl font-semibold" dir="ltr">
+        {scoreLine(m, t)}
+      </span>
+      <span className="w-full text-sm font-semibold text-bad sm:w-auto">{t('followLive')} →</span>
+    </a>
+  );
+}
+
+/** Signed-in family (online version): live score, requests, next session, last result, coaches. */
+function FamilyHome() {
+  const { state, t, lang, adapter } = useStore();
+  const me = useMe();
+  const player = state.players.find((p) => p.id === adapter.myId) ?? activePlayer(state);
+  const { plans, plan, choose } = usePlanChoice(player?.id);
+  const { conns } = useSocialState();
+  const [coachesOpen, setCoachesOpen] = useState(false);
+  const coaches = (conns ?? []).filter((c) => c.status === 'accepted');
+  const today = todayISO();
+  const drills = drillMap(state);
+  const all = player ? matchesOfPlayer(state, player.id) : [];
+  const live = all.filter((m) => m.status === 'live');
+  const next = plan?.sessions.find((s) => s.status === 'planned' && s.date >= today);
+  const tour = player ? state.tournaments.filter((x) => x.playerId === player.id && x.end >= today).sort((a, b) => a.start.localeCompare(b.start))[0] : undefined;
+  const name = player?.name ?? me?.displayName ?? '';
+  return (
+    <div data-testid="family-home">
+      <PageHeader eyebrow={t('familyEyebrow')} title={name} />
+      <Guide />
+      <IncomingRequestsCard />
+      <NotifyPrompt />
+      {conns !== null && !coaches.length && <FindCoachCard />}
+      {live.map((m) => (
+        <LiveCard key={m.id} m={m} name={name} />
+      ))}
+      {player && (
+        <div className="grid gap-5 lg:grid-cols-[1.5fr_1fr]">
+          <Card className="overflow-hidden" data-testid="family-next">
+            <div className="flex flex-col gap-2 bg-band p-5 text-band-ink">
+              <PlanSwitcher plans={plans} plan={plan} choose={choose} dark />
+              <div className="eyebrow !text-band-muted">{t('nextSession')}</div>
+              {next ? (
+                <>
+                  <h2 className="font-display text-[28px] leading-tight" data-testid="next-session-title">
+                    {next.title}
+                  </h2>
+                  <p className="num text-band-muted">
+                    {formatDate(lang, next.date, { weekday: 'long', day: 'numeric', month: 'long' })}
+                    {plan?.createdByName && ` · ${t('withCoach', { name: plan.createdByName })}`}
+                  </p>
+                  {next.focus && <p className="text-band-muted">{next.focus}</p>}
+                </>
+              ) : (
+                <p data-testid="family-no-session">{t(plan ? 'noUpcomingFamily' : coaches.length ? 'noPlanFromCoach' : 'noPlanNoCoach')}</p>
+              )}
+            </div>
+            {next && (
+              <div className="p-5">
+                <ol className="flex flex-col divide-y divide-line">
+                  {next.items.map((it) => {
+                    const d = drills.get(it.drillId);
+                    return (
+                      <li key={it.drillId} className="py-2.5">
+                        <a href={href(`drill-${it.drillId}`)} className="font-semibold hover:text-accent">
+                          {d?.name ?? it.drillId}
+                        </a>
+                        {it.reason && <p className="text-sm text-muted">{it.reason}</p>}
+                      </li>
+                    );
+                  })}
+                </ol>
+                <a href={href('parent')} className="mt-3 inline-flex h-10 items-center rounded-full border border-line px-4 text-sm font-semibold">
+                  {t('seeWholePlan')} →
+                </a>
+              </div>
+            )}
+          </Card>
+          <div className="flex flex-col gap-5">
+            <MatchesCard playerId={player.id} />
+            {tour && (
+              <Card className="p-5" data-testid="family-tournament">
+                <div className="eyebrow mb-1">{t('nextTournament')}</div>
+                <a href={href(`tournament-${tour.id}`)} className="font-display text-xl leading-tight hover:text-accent">
+                  {tour.name}
+                </a>
+                <p className="num mt-1 text-sm text-muted">
+                  {formatDate(lang, tour.start, { day: 'numeric', month: 'short' })}–{formatDate(lang, tour.end, { day: 'numeric', month: 'short' })}
+                </p>
+              </Card>
+            )}
+            <Card className="p-5" data-testid="family-coaches">
+              <SectionTitle
+                aside={
+                  <button type="button" className="text-sm font-semibold text-accent" onClick={() => setCoachesOpen(true)} data-testid="family-manage-coaches">
+                    {t('manage')} →
+                  </button>
+                }
+              >
+                {t('myCoachesTitle')}
+              </SectionTitle>
+              {coaches.length ? (
+                <ul className="flex flex-col gap-2">
+                  {coaches.map((c) => (
+                    <li key={c.username} className="flex flex-wrap items-center gap-x-2">
+                      <span className="font-semibold">{c.displayName}</span>
+                      {c.verified && <VerifiedBadge />}
+                      <Handle u={c.username} />
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-muted">{t('noCoachYet')}</p>
+              )}
+            </Card>
+          </div>
+        </div>
+      )}
+      {player && (
+        <a href={href('progress')} className="mt-5 inline-flex h-10 items-center rounded-full border border-line px-4 text-sm font-semibold">
+          {t('nav_progress')} →
+        </a>
+      )}
+      {coachesOpen && <CoachesModal onClose={() => setCoachesOpen(false)} />}
+    </div>
+  );
+}
+
 export function Dashboard() {
   const { state, t, lang, adapter } = useStore();
   const player = activePlayer(state);
+  const choice = usePlanChoice(player?.id);
+  if (adapter.social && adapter.maxRole === 'parent') return <FamilyHome />;
   if (!player) {
     const canAdd = state.settings.role !== 'parent' && adapter.canWrite !== false;
     if (adapter.social) {
@@ -61,6 +206,7 @@ export function Dashboard() {
       return (
         <div>
           <PageHeader eyebrow={t('appName')} title={t('welcomeName', { name: getSocial()?.me.displayName ?? '' })} />
+          <Guide />
           <IncomingRequestsCard />
           {adapter.maxRole === 'parent' ? <FindCoachCard /> : <FindPlayersCard />}
           {canAdd && (
@@ -94,7 +240,7 @@ export function Dashboard() {
       </div>
     );
   }
-  const plan = primaryPlan(state, player.id);
+  const plan = choice.plan;
   const drills = drillMap(state);
   const today = todayISO();
   const sessions = plan?.sessions ?? [];
@@ -111,6 +257,7 @@ export function Dashboard() {
   return (
     <div>
       <PageHeader eyebrow={plan?.name} title={t('nav_dashboard')} />
+      {adapter.social && <Guide />}
       <CoachRequestsBanner />
       <IncomingRequestsCard />
       <LiveElsewhere />
@@ -119,6 +266,11 @@ export function Dashboard() {
       <div className="grid gap-5 lg:grid-cols-[1.5fr_1fr]">
         <Card className="overflow-hidden">
           <div className="bg-band p-5 text-band-ink">
+            {choice.plans.length > 1 && (
+              <div className="mb-3">
+                <PlanSwitcher plans={choice.plans} plan={plan} choose={choice.choose} dark />
+              </div>
+            )}
             <div className="eyebrow !text-band-muted mb-1">{t('nextSession')}</div>
             {next ? (
               <>

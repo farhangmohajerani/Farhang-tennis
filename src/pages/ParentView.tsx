@@ -2,7 +2,8 @@ import { useStore } from '../lib/store';
 import { KPI_KEYS, type Plan } from '../types';
 import { catLabel, formatDate, type DictKey } from '../lib/i18n';
 import { href } from '../lib/router';
-import { activePlayer, drillMap, plansForPlayer, primaryPlan } from '../lib/reducer';
+import { activePlayer, drillMap, plansForPlayer } from '../lib/reducer';
+import { PlanSwitcher, usePlanChoice } from '../components/Onboarding';
 import { findConflicts, todayISO } from '../lib/schedule';
 import { stats } from '../lib/selectors';
 import { uid } from '../lib/id';
@@ -67,8 +68,9 @@ function CompeteSummary({ playerId }: { playerId: string }) {
 export function ParentView() {
   const { state, dispatch, t, lang, toast, adapter } = useStore();
   const player = activePlayer(state);
+  const choice = usePlanChoice(player?.id);
   if (!player) return <Empty>No player.</Empty>;
-  const plan = primaryPlan(state, player.id);
+  const plan = choice.plan;
   const drills = drillMap(state);
   const today = todayISO();
   const coach = state.people.find((p) => p.id === player.coachId);
@@ -112,6 +114,11 @@ export function ParentView() {
       <CompeteSummary playerId={player.id} />
 
       <SectionTitle>{t('calendar')}</SectionTitle>
+      {choice.plans.length > 1 && (
+        <div className="mb-3">
+          <PlanSwitcher plans={choice.plans} plan={plan} choose={choice.choose} />
+        </div>
+      )}
       {!plan ? (
         <Empty>{t(state.settings.role === 'parent' ? 'noUpcomingFamily' : 'noUpcoming')}</Empty>
       ) : (

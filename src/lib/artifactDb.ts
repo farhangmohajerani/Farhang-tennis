@@ -79,7 +79,7 @@ const COLLS = {
   tournaments: { path: 'academy/data/tournaments', schema: TournamentSchema },
   matches: { path: 'academy/data/matches', schema: MatchSchema },
 } as const;
-type CollKey = keyof typeof COLLS;
+export type CollKey = keyof typeof COLLS;
 const DRILLS_PATH = 'academy/library/drills';
 const CONFIG_PATH = 'academy/config';
 const PREFS_KEY = 'tennis-progress:prefs';
@@ -174,6 +174,10 @@ export class ArtifactDbAdapter implements StorageAdapter {
   /** A change the database refused (usernames mode): reported once, then the remote version returns. */
   private softError: string | null = null;
   onNotice?: (notice: 'not_connected') => void;
+  /** Usernames mode: new plans, results, tournaments and matches record who made them (only they may delete them). */
+  myName = '';
+  /** After a document was saved (the app announces a newly started live match). */
+  onSaved?: (coll: CollKey, body: Record<string, unknown>) => void;
   get canChart(): boolean {
     return this.maxRole === 'parent' && !!this.familyWriter && !!this.myId;
   }
@@ -376,6 +380,7 @@ export class ArtifactDbAdapter implements StorageAdapter {
           } else {
             this.famSent.set(id, matchJson(m));
             this.famWrittenAt.set(id, Date.now());
+            this.onSaved?.('matches', m as unknown as Record<string, unknown>);
           }
           this.famFailures = 0;
           this.fatal = null;
@@ -432,9 +437,10 @@ export class ArtifactDbAdapter implements StorageAdapter {
       }
       const raw = d.data();
       const parsed = schema.safeParse(raw);
-      // A document this version cannot read (e.g. written by a newer version), or a player linked into
-      // a family account (archived), is left alone: forgetting it here means saving never touches it.
-      if (!parsed.success || (k === 'players' && raw?.archived === true)) {
+      // A document this version cannot read (e.g. written by a newer version), a player linked into
+      // a family account (archived), or a match its family removed, is left alone: forgetting it here
+      // means saving never touches it.
+      if (!parsed.success || (k === 'players' && raw?.archived === true) || (k === 'matches' && raw?.deletedAt)) {
         this.synced.delete(path);
         continue;
       }
@@ -517,7 +523,8 @@ export class ArtifactDbAdapter implements StorageAdapter {
     if (this.maxRole === 'parent') return this.saveFamilyMatches(state);
     if (!this.canWrite) return Promise.resolve();
     const next = docsOf(state, !this.social);
-    for (const [path, body] of next) {
+    for (const [path, doc] of next) {
+      const body = this.stamped(path, doc);
       const json = JSON.stringify(body);
       if (this.synced.get(path) !== json) this.enqueue(path, { kind: 'set', body: JSON.parse(json) }, json);
     }
@@ -534,6 +541,27 @@ export class ArtifactDbAdapter implements StorageAdapter {
         else resolve();
       }),
     );
+  }
+
+  /**
+   * Usernames mode: a new plan, result, tournament or match is saved with its maker (createdBy, and the
+   * maker's name on plans); later versions keep the first maker even before the database's copy returns.
+   */
+  private stamped(path: string, body: Record<string, unknown>): Record<string, unknown> {
+    if (!this.social || !this.myId || body.createdBy !== undefined) return body;
+    const k = (['plans', 'logs', 'tournaments', 'matches'] as const).find((key) => path.startsWith(COLLS[key].path + '/'));
+    if (!k) return body;
+    const prev = this.synced.get(path);
+    if (prev === undefined) {
+      return k === 'plans' && this.myName ? { ...body, createdBy: this.myId, createdByName: this.myName.slice(0, 60) } : { ...body, createdBy: this.myId };
+    }
+    try {
+      const old = prev === UNKNOWN ? null : (JSON.parse(prev) as { createdBy?: string; createdByName?: string });
+      if (old?.createdBy) return { ...body, createdBy: old.createdBy, ...(old.createdByName && body.createdByName === undefined ? { createdByName: old.createdByName } : {}) };
+    } catch {
+      /* not JSON: leave it */
+    }
+    return body;
   }
 
   /**
@@ -580,6 +608,10 @@ export class ArtifactDbAdapter implements StorageAdapter {
         if (item.op.kind === 'set') await ref.set(item.op.body);
         else await ref.delete();
         if (this.pending.get(path) === item.v) this.pending.delete(path);
+        if (item.op.kind === 'set' && this.onSaved) {
+          const k = (Object.keys(COLLS) as CollKey[]).find((key) => path.startsWith(COLLS[key].path + '/'));
+          if (k) this.onSaved(k, item.op.body);
+        }
         return;
       } catch (e) {
         const code = (e as DbErr)?.code ?? 'unavailable';

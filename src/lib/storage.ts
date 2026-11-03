@@ -124,6 +124,12 @@ export interface SignupProfile {
   username: string;
   displayName: string;
   birthYear?: number | null;
+  /** The privacy notice version accepted at sign-up. */
+  consent?: string;
+  /** Families: a parent or guardian is making the account. */
+  guardian?: boolean;
+  /** Families: coaches may find them by name. */
+  discoverable?: boolean;
 }
 
 export class SupabaseAuth {
@@ -175,7 +181,19 @@ export class SupabaseAuth {
     return this.call(`signup?redirect_to=${encodeURIComponent(SupabaseAuth.appUrl())}`, {
       email,
       password,
-      data: { account_type: accountType, ...(profile ? { username: profile.username, display_name: profile.displayName, birth_year: profile.birthYear ?? null } : {}) },
+      data: {
+        account_type: accountType,
+        ...(profile
+          ? {
+              username: profile.username,
+              display_name: profile.displayName,
+              birth_year: profile.birthYear ?? null,
+              consent_version: profile.consent ?? null,
+              guardian: profile.guardian === true,
+              discoverable: profile.discoverable === true,
+            }
+          : {}),
+      },
     });
   }
 
@@ -205,6 +223,9 @@ export class SupabaseAuth {
       username: typeof m.username === 'string' ? m.username : '',
       displayName: typeof m.display_name === 'string' ? m.display_name : '',
       birthYear: typeof m.birth_year === 'number' ? m.birth_year : null,
+      consent: typeof m.consent_version === 'string' ? m.consent_version : undefined,
+      guardian: m.guardian === true,
+      discoverable: m.discoverable === true,
     };
   }
 

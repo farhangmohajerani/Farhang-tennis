@@ -6,7 +6,7 @@ import { uid } from '../lib/id';
 import { getSocial, reloadConnections } from '../lib/social';
 import { Badge, Button, ConfirmButton, cx, Field, inputCls, Modal, SectionTitle } from './ui';
 import { ParentLinks } from './ParentLink';
-import { DisconnectButton, Handle, MyUsername, PeopleSearch, RequestsList, useConnections } from './Social';
+import { DisconnectButton, Handle, MyUsername, PeopleSearch, RequestsList, useConnections, useOutgoingLink, useSocialError } from './Social';
 
 /** ownerId: usernames mode — a player without an account belongs to the coach who added it. */
 function blankPlayer(ownerId?: string | null): Player {
@@ -94,49 +94,86 @@ export function PlayerForm({ initial, onDone }: { initial?: Player; onDone?: () 
   );
 }
 
-/** Usernames mode: move a player without an account into a connected family account. */
+/**
+ * Usernames mode: move a player without an account into a connected family account. A coach asks the
+ * family, who decides; the admin moves it at once.
+ */
 function LinkToAccount({ player, onDone }: { player: Player; onDone: () => void }) {
-  const { state, dispatch, t, toast } = useStore();
+  const { state, dispatch, t, toast, adapter } = useStore();
   const social = getSocial();
+  const errText = useSocialError();
   const accounts = state.players.filter((x) => x.accountId && x.username);
   const [target, setTarget] = useState(accounts[0]?.id ?? '');
   if (!social) return null;
   if (!accounts.length) return <p className="w-full text-[13px] text-muted" data-testid="link-none">{t('linkNone')}</p>;
   const to = accounts.find((x) => x.id === target);
+  const admin = adapter.maxRole === 'admin';
   return (
-    <div className="flex w-full flex-wrap items-center gap-2 rounded-xl bg-sunken p-2" data-testid={`link-box-${player.id}`}>
-      <label className="text-[13px] font-semibold" htmlFor={`link-${player.id}`}>
-        {t('linkPick')}
-      </label>
-      <select id={`link-${player.id}`} className={cx(inputCls, 'w-auto py-1.5 text-[13px]')} value={target} onChange={(e) => setTarget(e.target.value)}>
-        {accounts.map((a) => (
-          <option key={a.id} value={a.id}>
-            {a.name} (@{a.username})
-          </option>
-        ))}
-      </select>
-      <ConfirmButton
-        label={t('linkGo')}
-        confirmLabel={t('linkConfirm')}
-        variant="primary"
-        onConfirm={async () => {
-          if (!to?.username) return;
-          try {
-            const r = await social.merge(player.id, to.username);
-            if (r?.error) {
-              toast(t(r.error === 'not_connected' ? 'socialErr_not_connected' : r.error === 'not_found' ? 'socialErr_not_found' : 'socialErr'), 'error');
-              return;
+    <div className="flex w-full flex-col gap-2 rounded-xl bg-sunken p-2.5" data-testid={`link-box-${player.id}`}>
+      <p className="text-[12.5px] text-muted">{t(admin ? 'linkAdminHelp' : 'linkAskHelp')}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="text-[13px] font-semibold" htmlFor={`link-${player.id}`}>
+          {t('linkPick')}
+        </label>
+        <select id={`link-${player.id}`} className={cx(inputCls, 'w-auto py-1.5 text-[13px]')} value={target} onChange={(e) => setTarget(e.target.value)}>
+          {accounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name} (@{a.username})
+            </option>
+          ))}
+        </select>
+        <ConfirmButton
+          label={t(admin ? 'linkGo' : 'linkAsk')}
+          confirmLabel={t(admin ? 'linkConfirm' : 'linkAskConfirm')}
+          variant="primary"
+          onConfirm={async () => {
+            if (!to?.username) return;
+            try {
+              const r = admin ? await social.merge(player.id, to.username) : await social.requestLink(player.id, to.username);
+              if (r?.error) {
+                toast(errText(r), 'error');
+                return;
+              }
+              if (admin) {
+                toast(t('linked', { n: r?.moved ?? 0, u: to.username }));
+                dispatch({ type: 'setActivePlayer', id: to.id });
+                social.refresh();
+              } else {
+                toast(t('linkAsked', { u: to.username }));
+              }
+              void reloadConnections();
+              onDone();
+            } catch {
+              toast(t('socialErr'), 'error');
             }
-            toast(t('linked', { n: r?.moved ?? 0, u: to.username }));
-            dispatch({ type: 'setActivePlayer', id: to.id });
-            social.refresh();
-            void reloadConnections();
-            onDone();
-          } catch {
-            toast(t('socialErr'), 'error');
-          }
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** The family has not answered yet: show it, and let the coach take it back. */
+function LinkPending({ playerId }: { playerId: string }) {
+  const { t, toast } = useStore();
+  const social = getSocial();
+  const link = useOutgoingLink(playerId);
+  if (!social || !link) return null;
+  return (
+    <div className="flex w-full flex-wrap items-center gap-2 rounded-xl bg-warn-soft px-2.5 py-2 text-[13px]" data-testid={`link-pending-${playerId}`}>
+      <span className="min-w-0 flex-1 font-semibold text-warn">{t('linkWaiting', { u: link.familyUsername })}</span>
+      <Button
+        size="sm"
+        data-testid={`link-cancel-${playerId}`}
+        onClick={async () => {
+          const r = await social.cancelLink(link.id).catch(() => ({ error: 'failed' }));
+          if (r?.error) toast(t('socialErr'), 'error');
+          else toast(t('requestCancelled'));
+          void reloadConnections();
         }}
-      />
+      >
+        {t('cancelRequest')}
+      </Button>
     </div>
   );
 }
@@ -250,6 +287,7 @@ export function PlayersModal({ open, onClose }: { open: boolean; onClose: () => 
                   <ParentLinks player={p} />
                 </div>
               )}
+              {social && !p.accountId && <LinkPending playerId={p.id} />}
               {linking === p.id && <LinkToAccount player={p} onDone={() => setLinking(null)} />}
             </li>
           ),

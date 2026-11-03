@@ -9,6 +9,7 @@
  */
 import type { DbLike, UserLike } from './artifactDb';
 import type { SupabaseAuth, SupabaseConfig } from './storage';
+import type { MyProfile } from './social';
 
 interface Row { path: string; data: Record<string, unknown>; updated_at: string }
 interface Snap { id: string; exists: boolean; data(): Record<string, unknown> | undefined; metadata: { fromCache: boolean; hasPendingWrites: boolean } }
@@ -148,7 +149,13 @@ export class SupabaseDocDb implements DbLike {
         this.notify(path);
       },
       delete: async () => {
-        await this.req(`docs?path=eq.${encodeURIComponent(path)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
+        const res = await this.req(`docs?path=eq.${encodeURIComponent(path)}&select=path`, { method: 'DELETE', headers: { Prefer: 'return=representation' } });
+        const gone = ((await res.json().catch(() => [])) as unknown[]).length;
+        if (!gone) {
+          // Nothing removed: already gone, or the database's rules keep it (made by someone else).
+          const still = (await (await this.req(`docs?select=path&path=eq.${encodeURIComponent(path)}`)).json()) as unknown[];
+          if (still.length) throw new DbError('invalid_argument', 'not_allowed_to_delete');
+        }
         this.cache.delete(path);
         this.notify(path);
       },
@@ -183,9 +190,7 @@ export class SupabaseDocDb implements DbLike {
  * Role: the staff table makes the admin (owner). Everyone else has a profile (supabase/social.sql):
  * a coach (editor of the players connected to them) or a family (their own player, read-only).
  */
-export async function supabaseUser(db: SupabaseDocDb, auth: SupabaseAuth): Promise<
-  UserLike & { role: string | null; email: string; profile: { username: string; displayName: string; kind: 'coach' | 'family' } | null }
-> {
+export async function supabaseUser(db: SupabaseDocDb, auth: SupabaseAuth): Promise<UserLike & { role: string | null; email: string; profile: MyProfile | null }> {
   const s = await auth.refresh();
   let role: string | null = null;
   try {
@@ -193,10 +198,22 @@ export async function supabaseUser(db: SupabaseDocDb, auth: SupabaseAuth): Promi
   } catch (e) {
     console.warn('claim_staff failed', e);
   }
-  type Profile = { username: string; displayName: string; kind: 'coach' | 'family' };
-  let profile: Profile | null = null;
+  let profile: MyProfile | null = null;
   try {
-    profile = await db.rpc<Profile | null>('my_profile');
+    const p = await db.rpc<Partial<MyProfile> | null>('my_profile');
+    profile = p?.username
+      ? {
+          username: p.username,
+          displayName: p.displayName ?? '',
+          kind: p.kind === 'coach' ? 'coach' : 'family',
+          discoverable: p.discoverable === true,
+          notifyLive: p.notifyLive !== false,
+          verified: p.verified === true,
+          blocked: p.blocked === true,
+          guardian: p.guardian === true,
+          consentAt: p.consentAt ?? null,
+        }
+      : null;
   } catch (e) {
     console.warn('my_profile failed', e);
   }

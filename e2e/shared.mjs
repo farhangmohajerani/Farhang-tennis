@@ -119,7 +119,7 @@ await step('a parent (Viewer) sees a connection code and no academy data', async
   await viewer.getByTestId('parent-connect').waitFor();
   code = (await viewer.getByTestId('pair-code').innerText()).trim();
   assert.match(code, /^\d{6}$/);
-  assert.equal(await viewer.locator('#role-select option').count(), 1);
+  assert.equal(await viewer.locator('#role-select').count(), 0, 'one role: no role picker');
   assert.ok(!(await viewer.locator('main').innerText()).includes('Ela Demir'));
 });
 await step('coach connects the parent to Ela with the code', async () => {

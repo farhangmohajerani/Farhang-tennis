@@ -74,6 +74,20 @@ export function useCanEdit(): boolean {
   return state.settings.role !== 'parent' && adapter.canWrite !== false;
 }
 
+/**
+ * Online version: whoever made a plan, result, tournament or match deletes it. The admin may delete
+ * anything, and older records without a maker stay open to the player's coaches.
+ */
+export function useCanDelete(): (doc: { createdBy?: string }) => boolean {
+  const { state, adapter } = useStore();
+  const staff = state.settings.role !== 'parent' && adapter.canWrite !== false;
+  return (doc) => {
+    if (!staff) return false;
+    if (!adapter.social || adapter.maxRole === 'admin') return true;
+    return !doc.createdBy || doc.createdBy === adapter.myId;
+  };
+}
+
 /** May start a new match: coaches, and parents who chart their own child's matches. */
 export function useCanChart(): boolean {
   const { state, adapter } = useStore();
@@ -88,7 +102,7 @@ export interface MatchRights {
   lockedBy: 'coach' | 'parent' | null;
   /** A coach may take the scoring over. */
   canTakeOver: boolean;
-  /** Deleting stays with coaches. */
+  /** Whoever started it (online version), any coach otherwise; a family removes only matches it charted. */
   canDelete: boolean;
 }
 
@@ -98,15 +112,18 @@ export function useMatchRights(m: Match): MatchRights {
   const role = state.settings.role;
   const me = adapter.myId ?? null;
   const staff = role !== 'parent' && adapter.canWrite !== false;
+  const canDeleteDoc = useCanDelete();
   const mine = !!me && m.scorerId === me;
   const someoneElse = !!m.scorerId && !mine;
   const live = m.status === 'live';
   if (staff) {
     const locked = live && someoneElse;
-    return { canEdit: !locked, lockedBy: locked ? m.scorerRole ?? 'coach' : null, canTakeOver: locked, canDelete: true };
+    return { canEdit: !locked, lockedBy: locked ? m.scorerRole ?? 'coach' : null, canTakeOver: locked, canDelete: canDeleteDoc(m) };
   }
-  if (role === 'parent' && adapter.canChart && mine) return { canEdit: true, lockedBy: null, canTakeOver: false, canDelete: false };
-  return { canEdit: false, lockedBy: live && m.scorerId ? m.scorerRole ?? 'coach' : null, canTakeOver: false, canDelete: false };
+  // A family removes a match it charted itself (online version).
+  const familyMade = role === 'parent' && !!adapter.social && !!me && (m.createdBy === me || mine);
+  if (role === 'parent' && adapter.canChart && mine) return { canEdit: true, lockedBy: null, canTakeOver: false, canDelete: familyMade };
+  return { canEdit: false, lockedBy: live && m.scorerId ? m.scorerRole ?? 'coach' : null, canTakeOver: false, canDelete: familyMade };
 }
 
 /** Scorer fields for a match this viewer starts or takes over. */

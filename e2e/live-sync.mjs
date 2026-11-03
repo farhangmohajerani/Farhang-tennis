@@ -37,6 +37,8 @@ async function signUp(page, { email, kind, username, name, year }) {
   if (year) await page.fill('#sb-birthyear', String(year));
   await page.fill('#sb-email', email);
   await page.fill('#sb-password', 'password123');
+  await page.getByTestId('consent-privacy').check();
+  if (kind === 'parent') await page.getByTestId('consent-guardian').check();
   await page.getByTestId('sign-up').click();
   await page.locator('main').waitFor();
 }
@@ -98,6 +100,8 @@ await step('setup: a coach and the family of Alya connect by username', async ()
   await signUp(fam, { email: 'parent@example.com', kind: 'parent', username: 'alya', name: 'Alya', year: 2013 });
   await fam.getByTestId('find-coach-card').getByTestId('people-search-input').fill('hamed');
   await fam.getByTestId('request-hamed').click();
+  await fam.getByTestId('allow-confirm').click();
+  await fam.getByTestId('req-out-hamed').waitFor();
   await owner.reload();
   await owner.getByTestId('accept-alya').click();
   await owner.getByText('Build a 10-session plan').waitFor({ timeout: 15000 });
@@ -111,7 +115,8 @@ await step(`coach charts ${POINTS} points; after each one the parent's scoreboar
   await owner.getByTestId('match-submit').click();
   await owner.getByTestId('scoreboard').waitFor();
   await fam.goto(URL_ + '#matches');
-  await fam.getByTestId('live-banner').click({ timeout: 15000 });
+  // The family is asked once whether to follow the match that just started.
+  await fam.getByTestId('live-alert-follow').click({ timeout: 15000 });
   await fam.getByTestId('scoreboard').waitFor();
   assert.equal(await fam.getByTestId('point-composer').count(), 0, 'the follower cannot chart');
   delays.push(await sameBoard(owner, fam, 'start'));
@@ -143,7 +148,8 @@ await step('a parent starts a match for their child; the coach sees it live and 
   await fam.getByTestId('match-submit').click();
   await fam.getByTestId('point-composer').waitFor();
   await owner.goto(URL_ + '#matches');
-  await owner.getByTestId('live-banner').filter({ hasText: 'Parent Opp' }).click({ timeout: 15000 });
+  await owner.getByTestId('live-alert').getByText('vs Parent Opp').waitFor({ timeout: 15000 });
+  await owner.getByTestId('live-alert-follow').click();
   await owner.getByTestId('live-follow').getByText(/A parent is scoring/).waitFor();
   assert.equal(await owner.getByTestId('point-composer').count(), 0, 'the coach follows; only the scorer charts');
   await owner.getByTestId('take-over').waitFor();

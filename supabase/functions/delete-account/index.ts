@@ -4,7 +4,8 @@
 // the players the person added without an account; those players; older family copies; links in
 // older player records; then the sign-in itself (profile, connections, staff role and plan go with
 // it). The last admin cannot delete their account. Same steps as delete_my_account() in
-// supabase/subscriptions.sql. Uses only Supabase's REST endpoints, so it needs no packages.
+// supabase/subscriptions.sql. The admin can remove another person's account by sending {"userId": …}
+// (never another admin's). Uses only Supabase's REST endpoints, so it needs no packages.
 //
 // Deploy: supabase functions deploy delete-account   (JWT check on: only signed-in people can call it)
 
@@ -30,8 +31,9 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   // Who is asking: Supabase Auth checks the token.
   const me = await fetch(`${env.url}/auth/v1/user`, { headers: { apikey: env.anonKey || env.serviceKey, Authorization: auth } });
   if (!me.ok) return reply({ error: 'not_signed_in' }, 401);
-  const uid = String(((await me.json()) as { id?: string }).id ?? '');
-  if (!UUID.test(uid)) return reply({ error: 'not_signed_in' }, 401);
+  const caller = String(((await me.json()) as { id?: string }).id ?? '');
+  if (!UUID.test(caller)) return reply({ error: 'not_signed_in' }, 401);
+  const input = (await req.json().catch(() => ({}))) as { userId?: unknown };
 
   // Everything below runs with the service key (a legacy JWT goes in both headers, a new secret key in apikey only).
   const service: Record<string, string> = env.serviceKey.startsWith('eyJ')
@@ -47,9 +49,18 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   };
   const rows = async <T>(path: string) => (await (await call(path)).json()) as T[];
 
+  let uid = caller;
   try {
     const admins = await rows<{ user_id: string }>('/rest/v1/staff?select=user_id&role=eq.admin');
-    if (admins.some((a) => a.user_id === uid) && admins.length <= 1) return reply({ error: 'last_admin' }, 400);
+    if (typeof input.userId === 'string' && input.userId !== caller) {
+      // The admin removes someone else's account.
+      if (!admins.some((a) => a.user_id === caller)) return reply({ error: 'not_admin' }, 403);
+      if (!UUID.test(input.userId)) return reply({ error: 'not_found' }, 404);
+      if (admins.some((a) => a.user_id === input.userId)) return reply({ error: 'staff' }, 400);
+      uid = input.userId;
+    } else if (admins.some((a) => a.user_id === uid) && admins.length <= 1) {
+      return reply({ error: 'last_admin' }, 400);
+    }
 
     // Players this person added without an account (a coach's own players).
     const owned = (await rows<{ path: string }>(`/rest/v1/docs?select=path&path=like.${enc(PLAYERS + '*')}&data->>ownerId=eq.${uid}`))

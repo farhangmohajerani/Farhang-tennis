@@ -88,6 +88,9 @@ async function writeStatic() {
   fs.mkdirSync(out, { recursive: true });
   fs.writeFileSync(path.join(out, 'app.css'), await buildCSS());
   fs.copyFileSync(path.join(root, 'index.html'), path.join(out, 'index.html'));
+  // public/: the installable-app files (manifest, notification worker, icons), served next to index.html.
+  const pub = path.join(root, 'public');
+  if (fs.existsSync(pub)) for (const f of fs.readdirSync(pub)) fs.copyFileSync(path.join(pub, f), path.join(out, f));
 }
 
 /**

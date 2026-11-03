@@ -107,6 +107,8 @@ export const PlayerSchema = z.object({
   username: z.string().optional(),
   /** Supabase: the coach who added this player without an account (only they see it). */
   ownerId: z.string().optional(),
+  /** Usernames mode: the family allows AI match analysis (statistics only, no names). */
+  aiConsent: z.boolean().optional(),
 });
 export type Player = z.infer<typeof PlayerSchema>;
 
@@ -143,6 +145,9 @@ export const PlanSchema = z.object({
   sharedWithCoachId: z.string().nullable(),
   createdAt: z.string(),
   sessions: z.array(SessionSchema),
+  /** Usernames mode: who made it (only they can delete it) and their name, for families with several coaches. */
+  createdBy: z.string().max(100).optional(),
+  createdByName: z.string().max(60).optional(),
 });
 export type Plan = z.infer<typeof PlanSchema>;
 
@@ -212,6 +217,8 @@ export const TournamentSchema = z.object({
   result: z.enum(ROUNDS).nullable().default(null),
   /** After the event: what went well, what to work on next. */
   review: z.string().default(''),
+  /** Usernames mode: who added it (only they can delete it). */
+  createdBy: z.string().max(100).optional(),
 });
 export type Tournament = z.infer<typeof TournamentSchema>;
 
@@ -309,6 +316,8 @@ export const MatchSchema = z.object({
    */
   scorerId: z.string().max(100).optional(),
   scorerRole: z.enum(['coach', 'parent']).optional(),
+  /** Usernames mode: who started it (only they can delete it). */
+  createdBy: z.string().max(100).optional(),
 });
 export type Match = z.infer<typeof MatchSchema>;
 export type MatchInsight = NonNullable<Match['ai']>;
@@ -331,6 +340,8 @@ export const LogSchema = z
     errors: z.record(z.enum(ERROR_TYPES), z.number().int().min(0)),
     notes: z.string(),
     createdAt: z.string(),
+    /** Usernames mode: who logged it (only they can delete it). */
+    createdBy: z.string().max(100).optional(),
   })
   .refine((l) => l.correctDecisions <= l.attempts, { message: 'Correct decisions cannot exceed attempts', path: ['correctDecisions'] })
   .refine((l) => l.correctDecisions <= l.eligible, { message: 'Correct decisions cannot exceed eligible opportunities', path: ['correctDecisions'] })

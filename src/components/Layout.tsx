@@ -11,14 +11,17 @@ import { getPairing } from '../lib/pairing';
 import { currentBuild, reloadTo, useNewVersion } from '../lib/update';
 import { getTeam } from '../lib/team';
 import { getSocial } from '../lib/social';
-import { CoachesModal, useIncomingCount } from './Social';
+import { CoachesModal, useIncomingCount, useMe } from './Social';
+import { SettingsModal } from './Settings';
+import { LiveAlert } from './Onboarding';
 
-export const NAV: { name: string; key: DictKey; roles: Role[] }[] = [
-  { name: 'dashboard', key: 'nav_dashboard', roles: ['parent', 'coach', 'admin'] },
+/** familyKey: the label a signed-in family sees (their home, their plan). */
+export const NAV: { name: string; key: DictKey; roles: Role[]; familyKey?: DictKey }[] = [
+  { name: 'dashboard', key: 'nav_dashboard', roles: ['parent', 'coach', 'admin'], familyKey: 'nav_home' },
   { name: 'library', key: 'nav_library', roles: ['parent', 'coach', 'admin'] },
   { name: 'planner', key: 'nav_planner', roles: ['coach', 'admin'] },
   { name: 'session', key: 'nav_session', roles: ['coach', 'admin'] },
-  { name: 'parent', key: 'nav_parent', roles: ['parent', 'coach', 'admin'] },
+  { name: 'parent', key: 'nav_parent', roles: ['parent', 'coach', 'admin'], familyKey: 'nav_plan' },
   { name: 'matches', key: 'nav_matches', roles: ['parent', 'coach', 'admin'] },
   { name: 'progress', key: 'nav_progress', roles: ['parent', 'coach', 'admin'] },
   { name: 'admin', key: 'nav_admin', roles: ['admin'] },
@@ -38,6 +41,7 @@ export function Layout({ route, children }: { route: string; children: ReactNode
   const [coachesOpen, setCoachesOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [changingPw, setChangingPw] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const rank: Record<Role, number> = { parent: 0, coach: 1, admin: 2 };
   const roles = ROLES.filter((r) => !adapter.maxRole || rank[r] <= rank[adapter.maxRole]);
   const canManage = role !== 'parent' && adapter.canWrite !== false;
@@ -48,6 +52,8 @@ export function Layout({ route, children }: { route: string; children: ReactNode
   // A signed-in parent (not a coach previewing the parent view) can add a child with the coach's code.
   const canConnectCoach = shared && !social && adapter.maxRole === 'parent' && !!getPairing()?.redeem;
   const isFamily = !!social && social.me.kind === 'family' && adapter.maxRole === 'parent';
+  const me = useMe();
+  const label = (n: (typeof NAV)[number]) => t(isFamily && n.familyKey ? n.familyKey : n.key);
   const countBadge = requests > 0 && (
     <span className="num ms-1 inline-flex min-w-5 items-center justify-center rounded-full bg-bad px-1.5 text-[11px] font-bold text-white" data-testid="requests-count">
       {requests}
@@ -65,20 +71,24 @@ export function Layout({ route, children }: { route: string; children: ReactNode
             <span className="truncate font-display text-[22px] leading-none tracking-tight">{t('appName')}</span>
           </a>
           <div className="ms-auto flex items-center gap-2">
-            <label className="sr-only" htmlFor="role-select">{t('role')}</label>
-            <select
-              id="role-select"
-              value={role}
-              onChange={(e) => dispatch({ type: 'setRole', role: e.target.value as Role })}
-              className="h-8 rounded-full border border-band-muted/40 bg-transparent px-2 text-[13px] font-semibold text-band-ink"
-              style={{ fontSize: 13 }}
-            >
-              {roles.map((r) => (
-                <option key={r} value={r} className="bg-band">
-                  {t(roleKey(r))}
-                </option>
-              ))}
-            </select>
+            {roles.length > 1 && (
+              <>
+                <label className="sr-only" htmlFor="role-select">{t('role')}</label>
+                <select
+                  id="role-select"
+                  value={role}
+                  onChange={(e) => dispatch({ type: 'setRole', role: e.target.value as Role })}
+                  className="h-8 rounded-full border border-band-muted/40 bg-transparent px-2 text-[13px] font-semibold text-band-ink"
+                  style={{ fontSize: 13 }}
+                >
+                  {roles.map((r) => (
+                    <option key={r} value={r} className="bg-band">
+                      {t(roleKey(r))}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
             <button
               type="button"
               onClick={() => dispatch({ type: 'setLang', lang: lang === 'en' ? 'fa' : 'en' })}
@@ -88,6 +98,17 @@ export function Layout({ route, children }: { route: string; children: ReactNode
             >
               {lang === 'en' ? 'فا' : 'EN'}
             </button>
+            {social && me && (
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                className="relative grid h-9 w-9 place-items-center rounded-full bg-accent font-display text-[17px] text-accent-ink"
+                aria-label={t('settingsTitle')}
+                data-testid="open-settings"
+              >
+                {me.displayName.trim().charAt(0).toUpperCase() || '⚙'}
+              </button>
+            )}
           </div>
         </div>
         <nav className="hidden border-t border-band-muted/20 md:block" aria-label="Main">
@@ -99,7 +120,7 @@ export function Layout({ route, children }: { route: string; children: ReactNode
                   className={cx('block rounded-full px-3.5 py-1.5 text-sm font-semibold', activeName === n.name ? 'bg-accent text-accent-ink' : 'text-band-muted hover:text-band-ink')}
                   aria-current={activeName === n.name ? 'page' : undefined}
                 >
-                  {t(n.key)}
+                  {label(n)}
                 </a>
               </li>
             ))}
@@ -129,7 +150,7 @@ export function Layout({ route, children }: { route: string; children: ReactNode
             )}
             {player && (
               <span className="text-muted">
-                {t('age', { n: new Date().getFullYear() - player.birthYear })} · {player.hand === 'right' ? 'RH' : 'LH'} · {player.backhand === 'two' ? '2HBH' : '1HBH'}
+                {t('age', { n: new Date().getFullYear() - player.birthYear })} · {t(player.hand === 'right' ? 'handRShort' : 'handLShort')} · {t(player.backhand === 'two' ? 'bh2Short' : 'bh1Short')}
               </span>
             )}
             {canManage && social && (
@@ -195,6 +216,20 @@ export function Layout({ route, children }: { route: string; children: ReactNode
       {coachesOpen && <CoachesModal onClose={() => setCoachesOpen(false)} />}
       {deleting && <DeleteAccountModal onClose={() => setDeleting(false)} />}
       {changingPw && <ChangePasswordModal onClose={() => setChangingPw(false)} />}
+      {settingsOpen && (
+        <SettingsModal
+          onClose={() => setSettingsOpen(false)}
+          onChangePassword={() => {
+            setSettingsOpen(false);
+            setChangingPw(true);
+          }}
+          onDelete={() => {
+            setSettingsOpen(false);
+            setDeleting(true);
+          }}
+        />
+      )}
+      {social && <LiveAlert route={route} />}
 
       <main className="gutter mx-auto w-full max-w-6xl flex-1 pb-28 md:pb-12">{children}</main>
 
@@ -248,7 +283,7 @@ export function Layout({ route, children }: { route: string; children: ReactNode
                 aria-current={activeName === n.name ? 'page' : undefined}
               >
                 <span className={cx('mb-1 h-1 w-6 rounded-full', activeName === n.name ? 'bg-accent' : 'bg-transparent')} />
-                {t(n.key)}
+                {label(n)}
               </a>
             </li>
           ))}

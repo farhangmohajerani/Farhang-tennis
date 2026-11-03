@@ -3,7 +3,9 @@ import { useStore } from '../lib/store';
 import { ERROR_TYPES, KPI_KEYS, type Drill, type ErrorType, type Log, type Plan, type Session } from '../types';
 import { formatDate, type DictKey } from '../lib/i18n';
 import { href, navigate } from '../lib/router';
-import { activePlayer, drillMap, primaryPlan } from '../lib/reducer';
+import { activePlayer, drillMap, plansForPlayer } from '../lib/reducer';
+import { usePlanChoice } from '../components/Onboarding';
+import { useCanDelete } from '../components/MatchBits';
 import { computeKpis, isOverAttempting, validateCounts } from '../lib/kpi';
 import { todayISO } from '../lib/schedule';
 import { uid } from '../lib/id';
@@ -13,7 +15,9 @@ import { stats } from '../lib/selectors';
 export function SessionExec({ sessionId }: { sessionId: string }) {
   const { state, dispatch, t, lang, toast } = useStore();
   const player = activePlayer(state);
-  const plan = player ? primaryPlan(state, player.id) : undefined;
+  const choice = usePlanChoice(player?.id);
+  // The plan that holds this session (a player with several coaches has several plans).
+  const plan = player ? (plansForPlayer(state, player.id).find((p) => p.sessions.some((s) => s.id === sessionId)) ?? choice.plan) : undefined;
   const today = todayISO();
   // Once a session is open it stays open (completing it must not jump to the next one).
   const [pinned, setPinned] = useState(sessionId);
@@ -124,6 +128,7 @@ const emptyErrors = (): Record<ErrorType, number> => ({ net: 0, long: 0, wide: 0
 
 function DrillLogger({ n, drill, session, playerId, reason, logs }: { n: number; drill: Drill; session: Session; plan: Plan; playerId: string; reason: string; logs: Log[] }) {
   const { dispatch, t, toast } = useStore();
+  const canDelete = useCanDelete();
   const defaultCtx: Log['context'] = session.kind === 'baseline' ? 'baseline' : session.kind === 'match-eval' ? 'match' : 'practice';
   const [open, setOpen] = useState(n === 1);
   const [ctx, setCtx] = useState<Log['context']>(defaultCtx);
@@ -233,16 +238,18 @@ function DrillLogger({ n, drill, session, playerId, reason, logs }: { n: number;
                       E{l.eligible} · A{l.attempts} · D{l.correctDecisions} · S{l.successful}
                     </span>
                     {l.notes && <span className="min-w-0 flex-1 truncate text-muted">{l.notes}</span>}
-                    <span className="ms-auto">
-                      <ConfirmButton
-                        label={t('delete')}
-                        confirmLabel={`${t('deleteLog')}?`}
-                        onConfirm={() => {
-                          dispatch({ type: 'deleteLog', id: l.id });
-                          toast(t('logDeleted'));
-                        }}
-                      />
-                    </span>
+                    {canDelete(l) && (
+                      <span className="ms-auto">
+                        <ConfirmButton
+                          label={t('delete')}
+                          confirmLabel={`${t('deleteLog')}?`}
+                          onConfirm={() => {
+                            dispatch({ type: 'deleteLog', id: l.id });
+                            toast(t('logDeleted'));
+                          }}
+                        />
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>

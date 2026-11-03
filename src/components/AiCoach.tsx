@@ -11,9 +11,14 @@ import type { Match } from '../types';
 import { Button, cx, Field, inputCls, Modal } from './ui';
 import { useCanEdit } from './MatchBits';
 
+const ACCOUNT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 export function AiCoach({ m, live }: { m: Match; live?: boolean }) {
-  const { dispatch, t, lang } = useStore();
+  const { state, dispatch, t, lang, adapter } = useStore();
   const canEdit = useCanEdit();
+  // Online version: a family account decides whether its matches may go to an AI service.
+  const player = state.players.find((p) => p.id === m.playerId);
+  const needsConsent = !!adapter.social && ACCOUNT_ID.test(m.playerId) && player?.aiConsent !== true;
   const [settings, setSettings] = useState<AiSettings>(loadAiSettings);
   const [setup, setSetup] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -26,6 +31,7 @@ export function AiCoach({ m, live }: { m: Match; live?: boolean }) {
   const provider = PROVIDER_NAME[settings.provider];
 
   const run = async (s = settings) => {
+    if (needsConsent) return;
     if (!keyFor(s)) {
       setSetup(true);
       return;
@@ -117,15 +123,21 @@ export function AiCoach({ m, live }: { m: Match; live?: boolean }) {
                     {t('aiDelete')}
                   </button>
                 )}
-                <button
-                  type="button"
-                  disabled={busy || !charted}
-                  onClick={() => void run()}
-                  className="rounded-full bg-[#d9f24a] px-4 py-1.5 text-[13.5px] font-bold text-[#0c1f38] transition active:scale-[0.98] disabled:opacity-60"
-                  data-testid="ai-ask"
-                >
-                  {ins ? t('aiAgain') : t('aiAsk')}
-                </button>
+                {needsConsent ? (
+                  <p className="max-w-xs text-[12.5px] font-semibold text-band-muted" data-testid="ai-needs-consent">
+                    {t('aiNeedsConsent', { name: player?.name ?? '' })}
+                  </p>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={busy || !charted}
+                    onClick={() => void run()}
+                    className="rounded-full bg-[#d9f24a] px-4 py-1.5 text-[13.5px] font-bold text-[#0c1f38] transition active:scale-[0.98] disabled:opacity-60"
+                    data-testid="ai-ask"
+                  >
+                    {ins ? t('aiAgain') : t('aiAsk')}
+                  </button>
+                )}
               </div>
             )}
           </div>

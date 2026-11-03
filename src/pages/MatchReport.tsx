@@ -8,6 +8,7 @@ import { DetailedAnalysis, MomentumChart, names, formatText, ResultBadge, scoreL
 import { EditMatchModal, MatchContext, PointList } from './MatchPage';
 import { AiCoach } from '../components/AiCoach';
 import { ExportMatchButton } from '../components/ExportMatch';
+import { getSocial } from '../lib/social';
 
 export { formatText };
 
@@ -186,7 +187,14 @@ export function MatchReport({ m }: { m: Match }) {
           <ConfirmButton
             label={t('deleteMatch')}
             confirmLabel={`${t('deleteMatch')}?`}
-            onConfirm={() => {
+            onConfirm={async () => {
+              if (state.settings.role === 'parent') {
+                // A family's own match: hidden for everyone through the database.
+                const r = await getSocial()
+                  ?.deleteMatch(m.id)
+                  .catch(() => ({ error: 'failed' }));
+                if (!r || r.error) return toast(t('socialErr'), 'error');
+              }
               dispatch({ type: 'deleteMatch', id: m.id });
               toast(t('matchDeleted'));
               navigate(tour ? `tournament-${tour.id}` : 'matches');

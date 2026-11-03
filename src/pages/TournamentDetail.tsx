@@ -9,7 +9,7 @@ import { daysBetween, evaluateTournament, phaseOf, PREP_DAYS, type GoalEval } fr
 import { METRIC_META, metricValue } from '../lib/match';
 import { GOAL_METRICS, MATCH_ROUNDS, ROUNDS, SURFACES, type Goal, type GoalMetric, type Round, type Tournament } from '../types';
 import { Badge, Button, Card, ConfirmButton, cx, Empty, Field, Icon, inputCls, PageHeader, SectionTitle } from '../components/ui';
-import { GoalChip, MatchRow, roundLabel, surfaceLabel, useCanEdit } from '../components/MatchBits';
+import { GoalChip, MatchRow, roundLabel, surfaceLabel, useCanDelete, useCanEdit } from '../components/MatchBits';
 import { Seg } from './MatchSetup';
 import { matchesQuery } from './Library';
 
@@ -254,6 +254,7 @@ function TextCard({ id, label, hint, value, canEdit, onSave }: { id: string; lab
 export function TournamentDetail({ id }: { id: string }) {
   const { state, dispatch, t, lang, toast } = useStore();
   const canEdit = useCanEdit();
+  const canDelete = useCanDelete();
   const tour = state.tournaments.find((x) => x.id === id);
   const [editing, setEditing] = useState(false);
   const today = todayISO();
@@ -454,7 +455,7 @@ export function TournamentDetail({ id }: { id: string }) {
         </div>
       </div>
 
-      {canEdit && (
+      {canEdit && canDelete(tour) && (
         <div className="mt-8 flex justify-end border-t border-line pt-4">
           <ConfirmButton
             label={t('deleteTournament')}

@@ -12,7 +12,8 @@ run() { if [ "$(id -u)" = 0 ]; then su postgres -s /bin/bash -c "$*"; else bash 
 dir="$(mktemp -d /tmp/pgtest-XXXXXX)"
 chmod 777 "$dir"
 cp "$sql"/academy.sql "$sql"/coach-requests.sql "$sql"/subscriptions.sql "$sql"/invites.sql "$sql"/family-matches.sql \
-   "$sql"/staff-codes.sql "$sql"/social.sql "$here"/stub.sql "$here"/social-test.sql "$here"/del-test.sql "$dir"/
+   "$sql"/staff-codes.sql "$sql"/social.sql "$sql"/social-2.sql "$here"/stub.sql "$here"/social-test.sql "$here"/del-test.sql \
+   "$here"/social2-test.sql "$dir"/
 chmod 644 "$dir"/*.sql
 port=5499
 run "'$bin/initdb' -D '$dir/data' -A trust -U postgres >/dev/null"
@@ -28,4 +29,10 @@ psql "-f '$dir/del-test.sql'" >/dev/null
 psql "-At -c \"select format('account deletion: %s of %s passed', count(*) filter (where ok), count(*)) from public.qa_results\""
 psql "-At -c \"select '  FAILED: ' || label from public.qa_results where ok is not true order by n\""
 f2=$(psql "-At -c \"select count(*) from public.qa_results where ok is not true\"")
-[ "$f1" = 0 ] && [ "$f2" = 0 ]
+# Upgrade path: social-2.sql on the database the checks above left behind.
+psql "-f '$dir/social-2.sql'" >/dev/null
+psql "-f '$dir/social2-test.sql'" >/dev/null
+psql "-At -c \"select format('consents, privacy, approvals, moderation: %s of %s passed', count(*) filter (where ok), count(*)) from public.qa_results\""
+psql "-At -c \"select '  FAILED: ' || label from public.qa_results where ok is not true order by n\""
+f3=$(psql "-At -c \"select count(*) from public.qa_results where ok is not true\"")
+[ "$f1" = 0 ] && [ "$f2" = 0 ] && [ "$f3" = 0 ]

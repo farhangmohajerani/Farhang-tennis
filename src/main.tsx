@@ -12,8 +12,23 @@ import { SupabaseDocDb, supabaseUser } from './lib/supabaseDb';
 import { roomPairing, setPairing } from './lib/pairing';
 import { setTeam, type TeamMember } from './lib/team';
 import { setMyPlan } from './lib/access';
-import { cleanUsername, setSocial, USERNAME_RE, type Connection, type Member, type SearchHit, type Social } from './lib/social';
+import {
+  cleanUsername,
+  CONSENT_VERSION,
+  profileChanged,
+  setSocial,
+  USERNAME_RE,
+  type Connection,
+  type LinkRequest,
+  type Member,
+  type MyProfile,
+  type Result,
+  type SearchHit,
+  type Social,
+} from './lib/social';
 import { asciiDigits } from './lib/i18n';
+import { PrivacyNoticeOverlay } from './components/PrivacyNotice';
+import { disablePush, registerWorker, setPushKeySource, setPushUser, syncPush } from './lib/push';
 
 async function boot(adapter: StorageAdapter): Promise<AppState> {
   try {
@@ -68,6 +83,13 @@ const T = fa
       available: 'آزاد است ✓', taken: 'این نام کاربری قبلاً گرفته شده؛ یکی دیگر بنویسید.', checking: 'در حال بررسی…',
       setupSave: 'ذخیره و ادامه', setupFailed: 'ذخیره نشد. اینترنت را چک کنید و دوباره امتحان کنید.', adminCoach: 'حساب مدیر به‌عنوان مربی هم کار می‌کند.',
       signOut: 'خروج', deleted: 'حساب شما حذف شد.',
+      agree: 'متن حریم خصوصی را خواندم و قبول دارم.', readNotice: 'خواندن متن',
+      guardian: 'من پدر، مادر یا سرپرست قانونی بازیکن هستم (یا خودم بازیکنم و ۱۸ سال یا بیشتر دارم).',
+      discover: 'مربی‌ها بتوانند ما را با نام هم پیدا کنند', discoverHint: 'اگر خاموش باشد، فقط کسی که نام کاربری دقیق شما را بداند پیدایتان می‌کند. بعداً در تنظیمات هم قابل تغییر است.',
+      needConsent: 'برای ادامه، متن حریم خصوصی را قبول کنید.', needGuardian: 'حساب بازیکن زیر ۱۸ سال را باید پدر، مادر یا سرپرستش بسازد.',
+      close: 'بستن', consentTitle: 'قبل از ادامه', consentText: 'از این نسخه، اپ قبل از هر کاری از شما اجازه می‌گیرد. لطفاً نحوهٔ استفاده از اطلاعاتتان را بخوانید و تأیید کنید.',
+      accept: 'قبول و ادامه', blockedTitle: 'این حساب متوقف شده است',
+      blockedText: 'آکادمی این حساب را موقتاً متوقف کرده است. اگر فکر می‌کنید اشتباهی شده، با مربی‌تان یا آکادمی تماس بگیرید.',
     }
   : {
       title: '21GRAM Tennis', sub: 'Sign in for coaches and families', email: 'Email', pass: 'Password (8+ characters)',
@@ -90,6 +112,13 @@ const T = fa
       available: 'Available ✓', taken: 'This username is taken — choose another.', checking: 'Checking…',
       setupSave: 'Save and continue', setupFailed: 'Could not save. Check the internet and try again.', adminCoach: 'The admin account also works as a coach.',
       signOut: 'Sign out', deleted: 'Your account has been deleted.',
+      agree: 'I have read and accept the privacy notice.', readNotice: 'Read it',
+      guardian: 'I am the player’s parent or legal guardian (or I am the player and 18 or older).',
+      discover: 'Coaches can also find us by name', discoverHint: 'When off, only someone who knows your exact username can find you. You can change this later in Settings.',
+      needConsent: 'Accept the privacy notice to continue.', needGuardian: 'A parent or guardian must make the account of a player under 18.',
+      close: 'Close', consentTitle: 'Before you continue', consentText: 'From this version the app asks before anything is shared. Please read how your information is used and confirm.',
+      accept: 'Accept and continue', blockedTitle: 'This account is paused',
+      blockedText: 'The academy has paused this account for now. If you think this is a mistake, contact your coach or the academy.',
     };
 
 function friendly(raw: string): string {
@@ -110,6 +139,7 @@ function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: Su
   const [username, setUsername] = useState('');
   const [name, setName] = useState('');
   const [year, setYear] = useState('');
+  const [consent, setConsent] = useState<Consent>({ agree: false, guardian: false, discoverable: false });
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
@@ -201,9 +231,19 @@ function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: Su
               if (mode === 'in') void run(() => auth.signIn(email.trim(), password), onDone);
               else if (!kind) setMsg({ text: T.pickType, bad: true });
               else if (!profileOk(kind === 'coach' ? 'coach' : 'family', username, name, year)) setMsg({ text: T.usernameHint, bad: true });
+              else if (!consent.agree) setMsg({ text: T.needConsent, bad: true });
+              else if (kind === 'parent' && !consent.guardian) setMsg({ text: T.needGuardian, bad: true });
               else
                 void run(async () => {
-                  const profile = { username, displayName: name.trim(), birthYear: kind === 'parent' && year ? Number(year) : null };
+                  const family = kind === 'parent';
+                  const profile = {
+                    username,
+                    displayName: name.trim(),
+                    birthYear: family && year ? Number(year) : null,
+                    consent: CONSENT_VERSION,
+                    guardian: family && consent.guardian,
+                    discoverable: family && consent.discoverable,
+                  };
                   try {
                     await auth.signUp(email.trim(), password, kind, profile);
                   } catch (e) {
@@ -218,13 +258,16 @@ function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: Su
             <input className={cls} type={show ? 'text' : 'password'} autoComplete={mode === 'in' ? 'current-password' : 'new-password'} autoCapitalize="none" autoCorrect="off" placeholder={T.pass} value={password} onChange={(e) => setPassword(e.target.value)} id="sb-password" dir="ltr" />
             {mode === 'up' && <p className={`-mt-1 text-[13px] ${password && password.length < 8 ? 'font-semibold text-bad' : 'text-muted'}`} data-testid="pw-hint">{T.pwHint}{password ? ` (${password.length}/8)` : ''}</p>}
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> {T.show}</label>
+            {mode === 'up' && kind && <ConsentFields kind={kind === 'coach' ? 'coach' : 'family'} c={consent} set={setConsent} />}
             {note}
             {mode === 'in' ? (
               <button type="submit" disabled={busy || !email || !password} className={primary} data-testid="sign-in">{T.signIn}</button>
             ) : (
               <button
                 type="submit"
-                disabled={busy || !email || password.length < 8 || !kind || !profileOk(kind === 'coach' ? 'coach' : 'family', username, name, year)}
+                disabled={
+                  busy || !email || password.length < 8 || !kind || !profileOk(kind === 'coach' ? 'coach' : 'family', username, name, year) || !consentOk(kind === 'coach' ? 'coach' : 'family', consent)
+                }
                 className={primary}
                 data-testid="sign-up"
               >
@@ -265,6 +308,45 @@ function profileOk(kind: 'coach' | 'family', username: string, name: string, yea
 }
 
 const fieldCls = 'w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-ink';
+
+type Consent = { agree: boolean; guardian: boolean; discoverable: boolean };
+const consentOk = (kind: 'coach' | 'family', c: Consent) => c.agree && (kind === 'coach' || c.guardian);
+
+/** Asked before an account is made: the privacy notice, and for a family the guardian and being found by name. */
+function ConsentFields({ kind, c, set, discover = true }: { kind: 'coach' | 'family'; c: Consent; set: (c: Consent) => void; discover?: boolean }) {
+  const [reading, setReading] = useState(false);
+  const row = 'flex items-start gap-2.5 text-[14px] leading-snug';
+  const box = 'mt-0.5 h-[18px] w-[18px] shrink-0 accent-accent';
+  return (
+    <fieldset className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-3.5" data-testid="consent-fields">
+      <label className={row}>
+        <input type="checkbox" className={box} checked={c.agree} onChange={(e) => set({ ...c, agree: e.target.checked })} data-testid="consent-privacy" />
+        <span>
+          {T.agree}{' '}
+          <button type="button" className="font-semibold text-accent underline" onClick={() => setReading(true)} data-testid="open-privacy">
+            {T.readNotice}
+          </button>
+        </span>
+      </label>
+      {kind === 'family' && (
+        <label className={row}>
+          <input type="checkbox" className={box} checked={c.guardian} onChange={(e) => set({ ...c, guardian: e.target.checked })} data-testid="consent-guardian" />
+          <span>{T.guardian}</span>
+        </label>
+      )}
+      {kind === 'family' && discover && (
+        <label className={row}>
+          <input type="checkbox" className={box} checked={c.discoverable} onChange={(e) => set({ ...c, discoverable: e.target.checked })} data-testid="consent-discoverable" />
+          <span>
+            <span className="font-semibold">{T.discover}</span>
+            <span className="mt-0.5 block text-[12.5px] text-muted">{T.discoverHint}</span>
+          </span>
+        </label>
+      )}
+      {reading && <PrivacyNoticeOverlay lang={fa ? 'fa' : 'en'} onClose={() => setReading(false)} closeLabel={T.close} />}
+    </fieldset>
+  );
+}
 
 /** Username, name and (for a family) the player's birth year: at sign-up and on the profile screen. */
 function ProfileFields({
@@ -323,13 +405,15 @@ function ProfileFields({
 type RegisterResult = { ok?: boolean; error?: string } | null;
 
 /** First sign-in without a profile (or the username was taken at sign-up): choose it here. */
+type Registration = { kind: 'coach' | 'family'; username: string; displayName: string; birthYear: number | null; consent: string; guardian: boolean; discoverable: boolean };
+
 function ProfileSetup({
   initial, fixedKind, error, register, available, onDone, onSignOut,
 }: {
-  initial: { kind: 'coach' | 'family' | null; username: string; displayName: string; birthYear: number | null };
+  initial: { kind: 'coach' | 'family' | null; username: string; displayName: string; birthYear: number | null; consent?: string; guardian?: boolean; discoverable?: boolean };
   fixedKind: 'coach' | null;
   error: string;
-  register: (p: { kind: 'coach' | 'family'; username: string; displayName: string; birthYear: number | null }) => Promise<RegisterResult>;
+  register: (p: Registration) => Promise<RegisterResult>;
   available: (u: string) => Promise<boolean>;
   onDone: () => void;
   onSignOut: () => void;
@@ -338,8 +422,9 @@ function ProfileSetup({
   const [username, setUsername] = useState(cleanUsername(initial.username));
   const [name, setName] = useState(initial.displayName);
   const [year, setYear] = useState(initial.birthYear ? String(initial.birthYear) : '');
+  const [consent, setConsent] = useState<Consent>({ agree: !!initial.consent, guardian: !!initial.guardian, discoverable: !!initial.discoverable });
   const [status, setStatus] = useState<'checking' | 'available' | 'taken' | null>(error === 'username_taken' ? 'taken' : null);
-  const [msg, setMsg] = useState(error && error !== 'username_taken' ? T.setupFailed : '');
+  const [msg, setMsg] = useState(error && !['username_taken', 'consent_required', 'guardian_required'].includes(error) ? T.setupFailed : '');
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (!USERNAME_RE.test(username)) return setStatus(null);
@@ -355,7 +440,7 @@ function ProfileSetup({
       clearTimeout(timer);
     };
   }, [username, available]);
-  const ok = !!kind && profileOk(kind, username, name, year) && status !== 'taken';
+  const ok = !!kind && profileOk(kind, username, name, year) && status !== 'taken' && consentOk(kind, consent);
   return (
     <div className="gutter mx-auto flex min-h-[100dvh] max-w-sm flex-col justify-center gap-4" dir={fa ? 'rtl' : 'ltr'} data-testid="profile-setup">
       <h1 className="font-display text-4xl">{T.title}</h1>
@@ -367,9 +452,20 @@ function ProfileSetup({
           setBusy(true);
           setMsg('');
           try {
-            const r = await register({ kind, username, displayName: name.trim(), birthYear: kind === 'family' && year ? Number(year) : null });
+            const family = kind === 'family';
+            const r = await register({
+              kind,
+              username,
+              displayName: name.trim(),
+              birthYear: family && year ? Number(year) : null,
+              consent: CONSENT_VERSION,
+              guardian: family && consent.guardian,
+              discoverable: family && consent.discoverable,
+            });
             if (r?.ok || r?.error === 'exists') return onDone();
             if (r?.error === 'username_taken') setStatus('taken');
+            else if (r?.error === 'consent_required') setMsg(T.needConsent);
+            else if (r?.error === 'guardian_required') setMsg(T.needGuardian);
             else setMsg(T.setupFailed);
           } catch {
             setMsg(T.setupFailed);
@@ -401,6 +497,7 @@ function ProfileSetup({
           </fieldset>
         )}
         {kind && <ProfileFields kind={kind} username={username} setUsername={setUsername} name={name} setName={setName} year={year} setYear={setYear} status={status} />}
+        {kind && <ConsentFields kind={kind} c={consent} set={setConsent} />}
         {msg && <p className="text-sm font-semibold text-bad" role="alert">{msg}</p>}
         <button type="submit" disabled={busy || !ok} className="h-11 rounded-full bg-accent font-semibold text-accent-ink disabled:opacity-40" data-testid="setup-save">
           {busy ? '…' : T.setupSave}
@@ -413,24 +510,124 @@ function ProfileSetup({
   );
 }
 
-interface RawHit { username: string; display_name: string; kind: 'coach' | 'family'; status: SearchHit['status']; direction: SearchHit['direction'] }
-interface RawConn { username: string; display_name: string; kind: 'coach' | 'family'; status: Connection['status']; direction: Connection['direction']; player_id: string; since: string }
-interface RawMember { user_id: string; username: string; display_name: string; kind: 'coach' | 'family'; email: string; created_at: string; connections: number }
+/** Accounts made before consent was asked: accept once, then continue. */
+function ConsentGate({ kind, give, onDone, onSignOut }: { kind: 'coach' | 'family'; give: (guardian: boolean) => Promise<Result>; onDone: () => void; onSignOut: () => void }) {
+  const [c, setC] = useState<Consent>({ agree: false, guardian: false, discoverable: false });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  return (
+    <div className="gutter mx-auto flex min-h-[100dvh] max-w-sm flex-col justify-center gap-4" dir={fa ? 'rtl' : 'ltr'} data-testid="consent-gate">
+      <h1 className="font-display text-4xl">{T.title}</h1>
+      <form
+        className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-5"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!consentOk(kind, c)) return setMsg(c.agree ? T.needGuardian : T.needConsent);
+          setBusy(true);
+          setMsg('');
+          try {
+            const r = await give(kind === 'family' && c.guardian);
+            if (r?.ok) return onDone();
+            setMsg(r?.error === 'guardian_required' ? T.needGuardian : r?.error === 'consent_required' ? T.needConsent : T.setupFailed);
+          } catch {
+            setMsg(T.setupFailed);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <h2 className="font-display text-2xl">{T.consentTitle}</h2>
+        <p className="text-sm text-muted">{T.consentText}</p>
+        <ConsentFields kind={kind} c={c} set={setC} discover={false} />
+        {msg && <p className="text-sm font-semibold text-bad" role="alert">{msg}</p>}
+        <button type="submit" disabled={busy || !consentOk(kind, c)} className="h-11 rounded-full bg-accent font-semibold text-accent-ink disabled:opacity-40" data-testid="consent-accept">
+          {busy ? '…' : T.accept}
+        </button>
+        <button type="button" className="text-sm font-semibold text-muted underline" onClick={onSignOut}>
+          {T.signOut}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+/** The academy paused this account: nothing else opens. */
+function Blocked({ onSignOut }: { onSignOut: () => void }) {
+  return (
+    <div className="gutter mx-auto flex min-h-[100dvh] max-w-sm flex-col justify-center gap-4" dir={fa ? 'rtl' : 'ltr'} data-testid="blocked">
+      <h1 className="font-display text-4xl">{T.title}</h1>
+      <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-5">
+        <h2 className="font-display text-2xl">{T.blockedTitle}</h2>
+        <p className="text-sm">{T.blockedText}</p>
+        <button type="button" className="h-11 rounded-full border border-line font-semibold" onClick={onSignOut} data-testid="blocked-sign-out">
+          {T.signOut}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface RawHit { username: string; display_name: string; kind: 'coach' | 'family'; verified: boolean; status: SearchHit['status']; direction: SearchHit['direction'] }
+interface RawConn {
+  username: string; display_name: string; kind: 'coach' | 'family'; verified: boolean; status: Connection['status']; direction: Connection['direction']; player_id: string; since: string;
+}
+interface RawLink {
+  id: string; offline_id: string; offline_name: string; coach_username: string; coach_name: string; family_username: string; family_name: string; direction: 'in' | 'out'; created_at: string;
+}
+interface RawMember {
+  user_id: string; username: string; display_name: string; kind: 'coach' | 'family'; email: string; created_at: string; connections: number;
+  blocked: boolean; verified: boolean; guardian: boolean; consent_at: string | null; staff: boolean;
+}
+
+/** Edge Functions (supabase/functions): JSON in, JSON out, with the signed-in person's token. */
+async function callFunction(cfg: SupabaseConfig, auth: SupabaseAuth, name: string, body: unknown): Promise<{ status: number; data: Result & { detail?: string } }> {
+  const s = await auth.refresh();
+  const res = await fetch(`${cfg.url}/functions/v1/${name}`, {
+    method: 'POST',
+    headers: { apikey: cfg.anonKey, Authorization: `Bearer ${s?.access_token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, data: (await res.json().catch(() => ({}))) as Result & { detail?: string } };
+}
 
 async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth, restart: () => void) {
   const db = new SupabaseDocDb(cfg, auth);
   let user = await supabaseUser(db, auth);
+  // This device's notifications go with the person signed in (and stop at sign-out).
+  void registerWorker();
+  const signOut = async () => {
+    db.stop();
+    await Promise.race([disablePush((endpoint) => db.rpc<Result>('disable_push_subscription', { p_endpoint: endpoint })), new Promise((r) => setTimeout(r, 1500))]).catch(() => undefined);
+    auth.signOut();
+    window.location.reload();
+  };
   if (!user.profile) {
     // Everyone has a username (supabase/social.sql). The admin's account works as a coach.
     const fixedKind = user.role ? 'coach' : null;
     const typed = auth.signupProfile();
-    const register = (x: { kind: 'coach' | 'family'; username: string; displayName: string; birthYear: number | null }) =>
-      db.rpc<RegisterResult>('register_profile', { p_username: x.username, p_display_name: x.displayName, p_kind: x.kind, p_birth_year: x.birthYear });
+    const register = (x: Registration) =>
+      db.rpc<RegisterResult>('register_profile_v2', {
+        p_username: x.username,
+        p_display_name: x.displayName,
+        p_kind: x.kind,
+        p_birth_year: x.birthYear,
+        p_discoverable: x.discoverable,
+        p_guardian: x.guardian,
+        p_consent: x.consent,
+      });
     let error = '';
     const kind = fixedKind ?? typed.kind;
-    if (kind && USERNAME_RE.test(typed.username) && typed.displayName.trim()) {
-      // Typed at sign-up: save it now.
-      const r = await register({ kind, username: typed.username, displayName: typed.displayName, birthYear: typed.birthYear ?? null }).catch((): RegisterResult => ({ error: 'failed' }));
+    if (kind && USERNAME_RE.test(typed.username) && typed.displayName.trim() && typed.consent) {
+      // Typed and accepted at sign-up: save it now.
+      const r = await register({
+        kind,
+        username: typed.username,
+        displayName: typed.displayName,
+        birthYear: kind === 'family' ? typed.birthYear ?? null : null,
+        consent: typed.consent,
+        guardian: kind === 'family' && !!typed.guardian,
+        discoverable: kind === 'family' && !!typed.discoverable,
+      }).catch((): RegisterResult => ({ error: 'failed' }));
       if (r?.ok || r?.error === 'exists') user = await supabaseUser(db, auth);
       else error = r?.error ?? 'failed';
     }
@@ -444,37 +641,157 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth, restart: (
           register={register}
           available={(u) => db.rpc<boolean>('username_available', { p_username: u })}
           onDone={restart}
-          onSignOut={() => {
-            auth.signOut();
-            window.location.reload();
-          }}
+          onSignOut={() => void signOut()}
         />,
       );
       return;
     }
   }
-  const profile = user.profile!;
+  const profile: MyProfile = user.profile!;
+  if (profile.blocked) {
+    db.stop();
+    root.render(<Blocked onSignOut={() => void signOut()} />);
+    return;
+  }
+  if (!profile.consentAt) {
+    // Accounts from before consent was asked.
+    db.stop();
+    root.render(
+      <ConsentGate
+        kind={profile.kind}
+        give={(guardian) => db.rpc<Result>('give_consent', { p_guardian: guardian, p_consent: CONSENT_VERSION })}
+        onDone={restart}
+        onSignOut={() => void signOut()}
+      />,
+    );
+    return;
+  }
+  const myId = (await user.id()) ?? '';
+  const fn = (name: string, body: unknown) => callFunction(cfg, auth, name, body);
+  // Notifications on this device: the server holds the key pair and hands out the public half.
+  setPushUser(myId);
+  setPushKeySource(async () => {
+    const r = await fn('notify', { action: 'publicKey' });
+    return (r.data as { publicKey?: string }).publicKey ?? '';
+  });
+  const rpc = (name: string, args: Record<string, unknown> = {}) => db.rpc<Result>(name, args);
   const social: Social = {
     me: profile,
+    myId,
     async search(q) {
-      const rows = (await db.rpc<RawHit[]>('search_profiles', { p_query: q })) ?? [];
-      return rows.map((h) => ({ username: h.username, displayName: h.display_name, kind: h.kind, status: h.status ?? null, direction: h.direction ?? null }));
+      const rows = (await db.rpc<RawHit[]>('search_people', { p_query: q })) ?? [];
+      return rows.map((h) => ({ username: h.username, displayName: h.display_name, kind: h.kind, verified: !!h.verified, status: h.status ?? null, direction: h.direction ?? null }));
     },
     async connections() {
-      const rows = (await db.rpc<RawConn[]>('my_connections')) ?? [];
-      return rows.map((c) => ({ username: c.username, displayName: c.display_name, kind: c.kind, status: c.status, direction: c.direction, playerId: c.player_id, since: c.since }));
+      const rows = (await db.rpc<RawConn[]>('my_connections_v2')) ?? [];
+      return rows.map((c) => ({
+        username: c.username,
+        displayName: c.display_name,
+        kind: c.kind,
+        verified: !!c.verified,
+        status: c.status,
+        direction: c.direction,
+        playerId: c.player_id,
+        since: c.since,
+      }));
     },
-    send: (u) => db.rpc('send_request', { p_username: u }),
-    respond: (u, accept) => db.rpc('respond_request', { p_username: u, p_accept: accept }),
-    remove: (u) => db.rpc('remove_connection', { p_username: u }),
-    merge: (id, u) => db.rpc('merge_offline_player', { p_offline: id, p_username: u }),
+    async links() {
+      const rows = (await db.rpc<RawLink[]>('my_link_requests')) ?? [];
+      return rows.map(
+        (l): LinkRequest => ({
+          id: l.id,
+          offlineId: l.offline_id,
+          offlineName: l.offline_name,
+          coachUsername: l.coach_username,
+          coachName: l.coach_name,
+          familyUsername: l.family_username,
+          familyName: l.family_name,
+          direction: l.direction,
+          createdAt: l.created_at,
+        }),
+      );
+    },
+    send: (u) => rpc('send_request', { p_username: u }),
+    respond: (u, accept) => rpc('respond_request', { p_username: u, p_accept: accept }),
+    remove: (u) => rpc('remove_connection', { p_username: u }),
+    requestLink: (id, u) => rpc('request_link', { p_offline: id, p_username: u }),
+    cancelLink: (id) => rpc('cancel_link', { p_id: id }),
+    respondLink: (id, accept) => rpc('respond_link', { p_id: id, p_accept: accept }),
+    merge: (id, u) => rpc('merge_offline_player', { p_offline: id, p_username: u }),
+    async updateProfile(p) {
+      const r = await rpc('update_my_profile', { p_display_name: p.displayName ?? null, p_discoverable: p.discoverable ?? null, p_notify_live: p.notifyLive ?? null });
+      if (r?.ok) {
+        if (p.displayName !== undefined) social.me.displayName = p.displayName.trim();
+        if (p.discoverable !== undefined && social.me.kind === 'family') social.me.discoverable = p.discoverable;
+        if (p.notifyLive !== undefined) social.me.notifyLive = p.notifyLive;
+        adapter.myName = social.me.displayName;
+        profileChanged();
+      }
+      return r;
+    },
+    async changeUsername(u) {
+      const r = await rpc('change_username', { p_username: u });
+      if (r?.ok && r.username) {
+        social.me.username = r.username;
+        profileChanged();
+      }
+      return r;
+    },
+    usernameAvailable: (u) => db.rpc<boolean>('username_available', { p_username: u }),
+    async updatePlayer(patch) {
+      const r = await rpc('family_update_player', { p_patch: patch });
+      if (r?.ok) {
+        if (patch.name) {
+          social.me.displayName = patch.name.trim();
+          adapter.myName = social.me.displayName;
+          profileChanged();
+        }
+        void db.poll();
+      }
+      return r;
+    },
+    deleteMatch: (id) => rpc('family_delete_match', { p_id: id }),
+    async notifyMatch(id) {
+      try {
+        const r = await fn('notify', { matchId: id });
+        if (r.status >= 400 && r.status !== 404) console.warn('notify', r.status, r.data);
+      } catch (e) {
+        console.warn('notify', e);
+      }
+    },
+    savePush: (x) => rpc('save_push_subscription', { p_endpoint: x.endpoint, p_p256dh: x.p256dh, p_auth: x.auth, p_lang: x.lang, p_user_agent: navigator.userAgent.slice(0, 300) }),
+    disablePush: (endpoint) => rpc('disable_push_subscription', { p_endpoint: endpoint }),
     async members() {
-      const rows = (await db.rpc<RawMember[]>('admin_profiles')) ?? [];
-      return rows.map((m): Member => ({ userId: m.user_id, username: m.username, displayName: m.display_name, kind: m.kind, email: m.email, createdAt: m.created_at, connections: m.connections }));
+      const rows = (await db.rpc<RawMember[]>('admin_profiles_v2')) ?? [];
+      return rows.map(
+        (m): Member => ({
+          userId: m.user_id,
+          username: m.username,
+          displayName: m.display_name,
+          kind: m.kind,
+          email: m.email,
+          createdAt: m.created_at,
+          connections: m.connections,
+          blocked: !!m.blocked,
+          verified: !!m.verified,
+          guardian: !!m.guardian,
+          consentAt: m.consent_at,
+          staff: !!m.staff,
+        }),
+      );
+    },
+    setFlags: (u, f) => rpc('admin_set_flags', { p_username: u, p_blocked: f.blocked ?? null, p_verified: f.verified ?? null }),
+    async removeAccount(userId) {
+      const r = await fn('delete-account', { userId });
+      if (r.status >= 400 || !r.data.ok) return { error: r.data.error || `http_${r.status}` };
+      return { ok: true };
     },
     refresh: () => void db.poll(),
   };
   setSocial(social);
+  const adapter = new ArtifactDbAdapter(db, user, `Online (Supabase) — each coach sees their connected players, each family their own player`);
+  adapter.social = true;
+  adapter.myName = profile.displayName;
   const rest = async (path: string, init: RequestInit = {}) => {
     const s = await auth.refresh();
     const res = await fetch(`${cfg.url}/rest/v1/${path}`, {
@@ -486,7 +803,6 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth, restart: (
   };
   // The account's own plan (a parent's Family plan). Missing table or no plan = no plan.
   try {
-    const myId = await user.id();
     const rows = (await (await rest(`subscriptions?select=plan,expires_at&user_id=eq.${myId}`)).json()) as { plan: 'coach' | 'family'; expires_at: string | null }[];
     if (rows[0]) setMyPlan({ plan: rows[0].plan, until: rows[0].expires_at });
   } catch {
@@ -494,10 +810,7 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth, restart: (
   }
   setTeam({
     myEmail: user.email,
-    signOut: () => {
-      auth.signOut();
-      window.location.reload();
-    },
+    signOut: () => void signOut(),
     async parents(ids) {
       if (!ids.length) return [];
       const emails = await db.rpc<{ id: string; email: string }[]>('user_emails', { p_ids: ids });
@@ -525,17 +838,10 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth, restart: (
     },
     async deleteAccount() {
       // supabase/functions/delete-account; projects set up before it have the database function instead.
-      const s = await auth.refresh();
-      const res = await fetch(`${cfg.url}/functions/v1/delete-account`, {
-        method: 'POST',
-        headers: { apikey: cfg.anonKey, Authorization: `Bearer ${s?.access_token}`, 'Content-Type': 'application/json' },
-        body: '{}',
-      });
-      if (res.status === 404) await db.rpc('delete_my_account');
-      else {
-        const r = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; detail?: string };
-        if (!res.ok || !r.ok) throw new Error(r.error === 'failed' && r.detail ? r.detail : r.error || `HTTP ${res.status}`);
-      }
+      await Promise.race([disablePush((endpoint) => db.rpc<Result>('disable_push_subscription', { p_endpoint: endpoint })), new Promise((r) => setTimeout(r, 1500))]).catch(() => undefined);
+      const r = await fn('delete-account', {});
+      if (r.status === 404) await db.rpc('delete_my_account');
+      else if (r.status >= 400 || !r.data.ok) throw new Error(r.data.error === 'failed' && r.data.detail ? r.data.detail : r.data.error || `HTTP ${r.status}`);
       db.stop();
       auth.signOut();
     },
@@ -572,11 +878,22 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth, restart: (
       else await rest(`staff?user_id=eq.${m.userId}`, { method: 'DELETE' });
     },
   });
-  const adapter = new ArtifactDbAdapter(db, user, `Online (Supabase) — each coach sees their connected players, each family their own player`);
-  adapter.social = true;
   // Families chart their own player's matches through a checked database function (supabase/social.sql).
   adapter.familyWriter = { save: (match) => db.rpc('family_save_match', { p_match: match }) };
-  render(await adapter.load(), adapter);
+  // A live match this person just started: tell the family and coaches once (supabase/functions/notify).
+  const announced = new Set<string>();
+  adapter.onSaved = (coll, body) => {
+    const id = typeof body.id === 'string' ? body.id : '';
+    if (coll !== 'matches' || body.status !== 'live' || !id || announced.has(id)) return;
+    if (body.scorerId && body.scorerId !== myId) return;
+    const started = Date.parse(String(body.createdAt ?? ''));
+    if (!started || Date.now() - started > 6 * 3600 * 1000) return;
+    announced.add(id);
+    void social.notifyMatch(id);
+  };
+  const state = await adapter.load();
+  void syncPush(social.savePush, state.settings.lang);
+  render(state, adapter);
 }
 
 const root = createRoot(document.getElementById('root')!);
