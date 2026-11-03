@@ -523,7 +523,18 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth, restart: (
       });
     },
     async deleteAccount() {
-      await db.rpc('delete_my_account');
+      // supabase/functions/delete-account; projects set up before it have the database function instead.
+      const s = await auth.refresh();
+      const res = await fetch(`${cfg.url}/functions/v1/delete-account`, {
+        method: 'POST',
+        headers: { apikey: cfg.anonKey, Authorization: `Bearer ${s?.access_token}`, 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      if (res.status === 404) await db.rpc('delete_my_account');
+      else {
+        const r = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; detail?: string };
+        if (!res.ok || !r.ok) throw new Error(r.error === 'failed' && r.detail ? r.detail : r.error || `HTTP ${res.status}`);
+      }
       db.stop();
       auth.signOut();
     },

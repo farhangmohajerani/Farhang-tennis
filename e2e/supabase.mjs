@@ -403,6 +403,42 @@ await step('a family deletes the account inside the app: their player, data and 
   assert.equal([...mock.connections.values()].some((c) => c.family_id === id), false);
   assert.equal(mock.profiles.has(id), false);
 });
+await step('a coach deletes the account: their players without an account go, connected families keep everything', async () => {
+  const id = idOf('reza@example.com');
+  await reza.goto(URL_ + '#dashboard');
+  await reza.reload();
+  await reza.locator('[id^="pl-name-"]').fill('Reza Kid');
+  await reza.getByTestId('save-player').click();
+  await reza.getByText('Build a 10-session plan').waitFor();
+  await reza.goto(URL_ + '#planner');
+  await reza.getByTestId('generate-plan').click();
+  await reza.getByTestId('save-plan').click();
+  let kid;
+  for (let i = 0; i < 50 && !(kid && docsOf((d) => d.data?.playerId === kid.data.id).length); i++) {
+    kid = docsOf((d) => d.path.startsWith('academy/data/players/') && d.data.name === 'Reza Kid')[0];
+    await reza.waitForTimeout(200);
+  }
+  const others = docsOf((d) => d.path.startsWith('academy/data/') && d.data?.ownerId !== id && d.data?.playerId !== kid.data.id).length;
+  await reza.goto(URL_ + '#dashboard');
+  await reza.getByTestId('delete-account').click();
+  await reza.fill('[data-testid="delete-confirm-input"]', 'DELETE');
+  await reza.getByTestId('delete-account-confirm').click();
+  await reza.getByText('Your account has been deleted.').waitFor();
+  assert.equal(mock.users.has('reza@example.com'), false);
+  assert.equal(mock.profiles.has(id), false);
+  assert.equal(mock.docs.has(kid.path), false, 'the player without an account is gone');
+  assert.equal(docsOf((d) => d.data?.playerId === kid.data.id).length, 0, 'and its plan');
+  assert.equal(docsOf((d) => d.path.startsWith('academy/data/')).length, others, 'nothing else was touched');
+});
+await step('the only admin cannot delete their account', async () => {
+  await owner.goto(URL_ + '#dashboard');
+  await owner.getByTestId('delete-account').click();
+  await owner.fill('[data-testid="delete-confirm-input"]', 'DELETE');
+  await owner.getByTestId('delete-account-confirm').click();
+  await owner.getByText(/only admin/).waitFor();
+  assert.ok(mock.users.has(OWNER));
+  await owner.keyboard.press('Escape');
+});
 console.log(`\n${passed} passed`);
 await browser.close();
 mock.server.close();

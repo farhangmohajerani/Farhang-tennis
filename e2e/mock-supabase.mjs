@@ -5,9 +5,56 @@
  */
 import http from 'node:http';
 import crypto from 'node:crypto';
+import { handle as deleteAccountFunction } from '../supabase/functions/delete-account/index.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const USERNAME = /^[a-z0-9][a-z0-9_.]{2,23}$/;
+/** The service role key (edge functions): passes every access rule. */
+export const SERVICE_KEY = 'service-role-test-key';
+
+/* ---- the PostgREST filters the app and the edge function use: eq, like (* wildcard), in, data->>key ---- */
+function filtersOf(url) {
+  const out = [];
+  for (const [key, v] of url.searchParams) {
+    if (['select', 'order', 'on_conflict', 'limit', 'offset'].includes(key)) continue;
+    const m = /^(eq|like|in)\.([\s\S]*)$/.exec(v);
+    if (!m) throw new Error(`mock: unsupported filter ${key}=${v}`);
+    out.push({ key, op: m[1], arg: m[2] });
+  }
+  return out;
+}
+function fieldOf(row, key) {
+  const j = /^(\w+)->>(\w+)$/.exec(key);
+  const v = j ? row[j[1]]?.[j[2]] : row[key];
+  return v === undefined || v === null ? null : String(v);
+}
+function inList(arg) {
+  const body = arg.replace(/^\(/, '').replace(/\)$/, '');
+  const out = [];
+  let cur = '';
+  let quoted = false;
+  for (const ch of body) {
+    if (ch === '"') quoted = !quoted;
+    else if (ch === ',' && !quoted) {
+      out.push(cur);
+      cur = '';
+    } else cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+const likeRe = (pat) => new RegExp('^' + [...pat].map((ch) => (ch === '*' || ch === '%' ? '.*' : ch === '_' ? '.' : ch.replace(/[.+?^${}()|[\]\\/]/g, '\\$&'))).join('') + '$', 's');
+const passes = (row, filters) =>
+  filters.every(({ key, op, arg }) => {
+    const v = fieldOf(row, key);
+    if (op === 'eq') return v === arg;
+    if (op === 'like') return v !== null && likeRe(arg).test(v);
+    return v !== null && inList(arg).includes(v);
+  });
+const pick = (rows, url) => {
+  const cols = (url.searchParams.get('select') ?? '').split(',');
+  return rows.map((r) => Object.fromEntries(cols.map((c) => [c, r[c]])));
+};
 
 export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com') {
   const users = new Map(); // email -> {id, email, password, meta}
@@ -62,9 +109,21 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
     const payload = Buffer.from(JSON.stringify({ sub: u.id, email: u.email, user_metadata: u.meta ?? {}, exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url');
     return { access_token: `x.${payload}.${t}`, refresh_token: t, expires_at: Math.floor(Date.now() / 1000) + 3600, user: { id: u.id, email: u.email } };
   };
+  const SERVICE = { id: 'service', email: '', service: true };
   const who = (req) => {
-    const t = (req.headers.authorization ?? '').split('.').pop();
+    const authz = req.headers.authorization ?? '';
+    if (authz === `Bearer ${SERVICE_KEY}` || (!authz && req.headers.apikey === SERVICE_KEY)) return SERVICE;
+    const t = authz.split('.').pop();
     return tokens.get(t) ?? null;
+  };
+  /** Remove an account the way auth.users' "on delete cascade" does. */
+  const dropUser = (id) => {
+    for (const [k, c] of connections) if (c.coach_id === id || c.family_id === id) connections.delete(k);
+    profiles.delete(id);
+    staff.delete(id);
+    subs.delete(id);
+    for (const [email, x] of users) if (x.id === id) users.delete(email);
+    for (const [t, x] of tokens) if (x.id === id) tokens.delete(t);
   };
   const putDoc = (path, data) => docs.set(path, { path, parent: parentOf(path), data, updated_at: stamp() });
 
@@ -248,12 +307,7 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
         else if (/^academy\/data\/(plans|logs|tournaments|matches)\//.test(d.path) && (pid === u.id || offline.has(pid))) docs.delete(d.path);
         else if (isPlayerPath(d.path) && offline.has(seg(d.path))) docs.delete(d.path);
       }
-      for (const [k, c] of connections) if (c.coach_id === u.id || c.family_id === u.id) connections.delete(k);
-      profiles.delete(u.id);
-      staff.delete(u.id);
-      subs.delete(u.id);
-      users.delete(u.email);
-      for (const [t, x] of tokens) if (x.id === u.id) tokens.delete(t);
+      dropUser(u.id);
       return undefined;
     },
   };
@@ -288,11 +342,29 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
       return u && u.password === json.password ? send(200, issue(u)) : send(400, { error_description: 'Invalid login credentials' });
     }
     if (p === '/auth/v1/recover') return send(200, {});
+    if (p === '/functions/v1/delete-account') {
+      // Like the platform's JWT check: a signed-in user's token is required before the function runs.
+      if (!who(req) || who(req).service) return send(401, { msg: 'Invalid JWT' });
+      const r = await deleteAccountFunction(
+        new Request(`http://localhost:${port}${req.url}`, { method: req.method, headers: { authorization: req.headers.authorization ?? '', apikey: req.headers.apikey ?? '' }, body: body || undefined }),
+        { url: `http://localhost:${port}`, serviceKey: SERVICE_KEY, anonKey: 'test' },
+      );
+      res.writeHead(r.status, { 'Content-Type': 'application/json' });
+      return res.end(await r.text());
+    }
     const u = who(req);
     if (!u) return send(401, { message: 'JWT required' });
+    if (p === '/auth/v1/user' && req.method === 'GET') return u.service ? send(401, {}) : send(200, { id: u.id, email: u.email });
     if (p === '/auth/v1/user' && req.method === 'PUT') {
       u.password = json.password;
       return send(200, { id: u.id, email: u.email });
+    }
+    if (p.startsWith('/auth/v1/admin/users/') && req.method === 'DELETE') {
+      if (!u.service) return send(403, { msg: 'User not allowed' });
+      const id = p.split('/').pop();
+      if (![...users.values()].some((x) => x.id === id)) return send(404, { msg: 'User not found' });
+      dropUser(id);
+      return send(200, {});
     }
     if (p.startsWith('/rest/v1/rpc/')) {
       const fn = rpc[p.split('/').pop()];
@@ -302,32 +374,30 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
       return out === undefined ? send(204) : send(200, out);
     }
     if (p === '/rest/v1/docs') {
+      const filters = filtersOf(url);
+      const visible = [...docs.values()].filter((d) => (u.service || canRead(u, d.path, d.data)) && passes(d, filters)).sort((a, b) => a.path.localeCompare(b.path));
       if (req.method === 'GET') {
-        let rows = [...docs.values()].filter((d) => canRead(u, d.path, d.data)).sort((a, b) => a.path.localeCompare(b.path));
-        const inF = url.searchParams.get('path');
-        if (inF?.startsWith('in.(')) {
-          const want = inF.slice(4, -1).split(',').map((s) => s.replace(/^"|"$/g, ''));
-          rows = rows.filter((r) => want.includes(r.path));
-        }
         const [from, to] = (req.headers.range ?? '0-9999').split('-').map(Number);
-        rows = rows.slice(from, to + 1);
-        const cols = (url.searchParams.get('select') ?? '').split(',');
-        return send(200, rows.map((r) => Object.fromEntries(cols.map((c) => [c, r[c]]))));
+        return send(200, pick(visible.slice(from, to + 1), url));
       }
       if (req.method === 'POST') {
         const old = docs.get(json.path);
-        const ok = old
-          ? canUpdate(u, json.path, old.data, json.data) && canRead(u, json.path, old.data)
-          : canInsert(u, json.path, json.data) && canRead(u, json.path, json.data);
+        const ok =
+          u.service ||
+          (old ? canUpdate(u, json.path, old.data, json.data) && canRead(u, json.path, old.data) : canInsert(u, json.path, json.data) && canRead(u, json.path, json.data));
         if (!ok) return send(403, { message: 'new row violates row-level security policy for table "docs"' });
         putDoc(json.path, json.data);
         return send(201);
       }
       if (req.method === 'DELETE') {
-        const path = url.searchParams.get('path').replace(/^eq\./, '');
-        const d = docs.get(path);
+        if (!filters.length) return send(400, { message: 'DELETE requires a WHERE clause' });
         // Like PostgREST: rows the rules do not allow are simply not deleted.
-        if (d && canRead(u, path, d.data) && canDelete(u, path, d.data)) docs.delete(path);
+        for (const d of visible) if (u.service || canDelete(u, d.path, d.data)) docs.delete(d.path);
+        return send(204);
+      }
+      if (req.method === 'PATCH') {
+        if (!filters.length) return send(400, { message: 'UPDATE requires a WHERE clause' });
+        for (const d of visible) if (u.service || canUpdate(u, d.path, d.data, json.data)) putDoc(d.path, json.data);
         return send(204);
       }
     }
@@ -350,7 +420,7 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
       }
     }
     if (p === '/rest/v1/staff') {
-      if (req.method === 'GET') return send(200, role(u) ? [...staff.values()] : []);
+      if (req.method === 'GET') return send(200, u.service || role(u) ? pick([...staff.values()].filter((r) => passes(r, filtersOf(url))), url) : []);
       return send(403, {});
     }
     send(404, { message: 'not found ' + p });
