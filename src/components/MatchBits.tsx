@@ -127,6 +127,36 @@ export function scoreLine(m: Match, t: T): string {
   return (s.text || '0-0') + suffix;
 }
 
+/** Coaches with several players: live matches of the players not selected right now. */
+export function LiveElsewhere() {
+  const { state, dispatch, t } = useStore();
+  const active = state.settings.activePlayerId;
+  const live = state.matches.filter((m) => m.status === 'live' && m.playerId !== active);
+  if (!live.length) return null;
+  return (
+    <div className="mb-4 flex flex-col gap-2" data-testid="live-elsewhere">
+      {live.map((m) => (
+        <a
+          key={m.id}
+          href={href(`match-${m.id}`)}
+          onClick={() => dispatch({ type: 'setActivePlayer', id: m.playerId })}
+          className="flex flex-wrap items-center gap-2 rounded-2xl border border-bad/40 bg-bad-soft p-3 text-sm"
+          data-testid="live-elsewhere-item"
+        >
+          <Badge tone="bad">
+            <span className="live-dot" aria-hidden="true" /> {t('live')}
+          </Badge>
+          <span className="font-semibold">{state.players.find((p) => p.id === m.playerId)?.name ?? t('player')}</span>
+          <span className="min-w-0 flex-1 truncate">{t('vsName', { name: m.opponent || t('opponent') })}</span>
+          <span className="num font-mono font-semibold" dir="ltr">
+            {scoreLine(m, t)}
+          </span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
 export function ResultBadge({ m }: { m: Match }) {
   const { t } = useStore();
   if (m.status === 'live') return <Badge tone="bad"><span className="live-dot" aria-hidden="true" /> {t('live')}</Badge>;

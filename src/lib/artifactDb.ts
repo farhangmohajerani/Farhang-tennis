@@ -173,6 +173,7 @@ export class ArtifactDbAdapter implements StorageAdapter {
   social = false;
   /** A change the database refused (usernames mode): reported once, then the remote version returns. */
   private softError: string | null = null;
+  onNotice?: (notice: 'not_connected') => void;
   get canChart(): boolean {
     return this.maxRole === 'parent' && !!this.familyWriter && !!this.myId;
   }
@@ -592,7 +593,8 @@ export class ArtifactDbAdapter implements StorageAdapter {
           // Usernames mode: e.g. the player is no longer connected. Only this change is dropped and the
           // database's version comes back; everything else keeps saving.
           console.warn('write refused', path, e);
-          this.softError = 'This change was not saved: you no longer have access to this player.';
+          this.softError = 'not_connected';
+          this.onNotice?.('not_connected');
           const k = (Object.keys(COLLS) as CollKey[]).find((key) => path.startsWith(COLLS[key].path + '/'));
           if (k) setTimeout(() => this.applyColl(k), 0);
           return;

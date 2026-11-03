@@ -13,6 +13,7 @@ import { roomPairing, setPairing } from './lib/pairing';
 import { setTeam, type TeamMember } from './lib/team';
 import { setMyPlan } from './lib/access';
 import { cleanUsername, setSocial, USERNAME_RE, type Connection, type Member, type SearchHit, type Social } from './lib/social';
+import { asciiDigits } from './lib/i18n';
 
 async function boot(adapter: StorageAdapter): Promise<AppState> {
   try {
@@ -308,7 +309,7 @@ function ProfileFields({
             className={`${fieldCls} font-normal`}
             inputMode="numeric"
             value={year}
-            onChange={(e) => setYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
+            onChange={(e) => setYear(asciiDigits(e.target.value).replace(/\D/g, '').slice(0, 4))}
             placeholder={String(thisYear - 12)}
             dir="ltr"
           />

@@ -96,6 +96,16 @@ export function StoreProvider({ initial, adapter, children }: { initial: AppStat
     setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== id)), 3200);
   }, []);
 
+  // Usernames mode: a change refused because the coach was just disconnected from that player.
+  useEffect(() => {
+    adapter.onNotice = (n) => {
+      if (n === 'not_connected') toast(t('changeNotSaved'), 'warn');
+    };
+    return () => {
+      adapter.onNotice = undefined;
+    };
+  }, [adapter, t, toast]);
+
   const resetDemo = useCallback(() => {
     const fresh = createDemoState(todayISO());
     fresh.settings.lang = latest.current.settings.lang;

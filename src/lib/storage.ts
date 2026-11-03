@@ -21,6 +21,8 @@ export interface StorageAdapter {
   myId?: string | null;
   /** Supabase with usernames: coaches see connected players and their own; families their own player. */
   social?: boolean;
+  /** Set by the store: a change was refused because the person lost access to that player. */
+  onNotice?: (notice: 'not_connected') => void;
   /** A parent who may chart the live score of their own child's matches (Supabase). */
   readonly canChart?: boolean;
   /** Human-readable description shown in the UI so demo storage is never mistaken for production. */

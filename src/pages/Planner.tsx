@@ -93,7 +93,7 @@ export function Planner({ planId }: { planId: string }) {
     const plan: Plan = {
       id: uid('plan'),
       playerId: player.id,
-      name: `${player.name} — ${formatDate('en', dates[0], { day: 'numeric', month: 'short' })} block`,
+      name: t('planBlockName', { name: player.name, date: formatDate(lang, dates[0], { day: 'numeric', month: 'short' }) }),
       priority: '',
       owner: 'coach',
       sharedWithCoachId: null,
@@ -102,7 +102,7 @@ export function Planner({ planId }: { planId: string }) {
         id: uid('sess'),
         index: i + 1,
         date,
-        title: i === 0 ? 'Baseline assessment' : i === 9 ? 'Re-test vs baseline' : `${t('session')} ${i + 1}`,
+        title: i === 0 ? t('baselineSession') : i === 9 ? t('retestSession') : `${t('session')} ${i + 1}`,
         focus: '',
         items: [],
         status: 'planned',

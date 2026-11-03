@@ -171,7 +171,7 @@ export function ParentView() {
         </ol>
       )}
 
-      {adapter.kind === 'artifact' && adapter.maxRole === 'parent' && (
+      {adapter.kind === 'artifact' && adapter.maxRole === 'parent' && !adapter.social && (
         <section className="mt-8">
           <p className="mb-2 text-sm text-muted">{t('addAnotherChild')}</p>
           <ParentConnect compact />

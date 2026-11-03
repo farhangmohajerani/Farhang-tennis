@@ -160,7 +160,7 @@ const en = {
   loggedFor: 'Logged results for this session',
   deleteLog: 'Delete result',
   logDeleted: 'Result deleted',
-  parentTitle: 'Parent view',
+  parentTitle: 'Family view',
   parentIntro: 'What {name} trains, why each drill was chosen, and whether it is working.',
   readOnly: 'Read-only',
   calendar: 'Training calendar',
@@ -849,6 +849,10 @@ const en = {
   findPlayersCard: 'Find your players',
   findPlayersCardHelp: 'Search for each player by the username their family chose, and send a request.',
   welcomeName: 'Welcome, {name}',
+  changeNotSaved: 'This change was not saved: you are no longer connected to this player.',
+  baselineSession: 'Baseline assessment',
+  retestSession: 'Re-test vs baseline',
+  planBlockName: '{name} — {date} block',
   onlineBadge: 'Online',
   storageSocial: 'online — each coach sees the players connected to them; each family sees its own player',
 };
@@ -1013,7 +1017,7 @@ const fa: Partial<Record<DictKey, string>> = {
   loggedFor: 'نتایج ثبت‌شدهٔ این جلسه',
   deleteLog: 'حذف نتیجه',
   logDeleted: 'نتیجه حذف شد',
-  parentTitle: 'نمای والدین',
+  parentTitle: 'نمای خانواده',
   parentIntro: '{name} چه تمرین می‌کند، چرا، و آیا نتیجه می‌دهد.',
   readOnly: 'فقط خواندنی',
   calendar: 'تقویم تمرین',
@@ -1701,6 +1705,10 @@ const fa: Partial<Record<DictKey, string>> = {
   findPlayersCard: 'بازیکن‌هایتان را پیدا کنید',
   findPlayersCardHelp: 'هر بازیکن را با نام کاربری‌ای که خانواده‌اش ساخته جست‌وجو کنید و درخواست بفرستید.',
   welcomeName: 'خوش آمدید، {name}',
+  changeNotSaved: 'این تغییر ذخیره نشد: دیگر به این بازیکن متصل نیستید.',
+  baselineSession: 'سنجش پایه',
+  retestSession: 'آزمون مجدد و مقایسه با پایه',
+  planBlockName: '{name} — دورهٔ {date}',
   onlineBadge: 'آنلاین',
   storageSocial: 'آنلاین — هر مربی بازیکن‌های متصل به خودش را می‌بیند و هر خانواده بازیکن خودش را',
 };
@@ -1728,6 +1736,10 @@ export function translate(lang: Lang, key: DictKey, vars?: Record<string, string
   if (vars) for (const [k, v] of Object.entries(vars)) s = s.replace(new RegExp(`\\{${k}\\}`, 'g'), formatNum(lang, v));
   return s;
 }
+
+/** Persian (۰–۹) and Arabic-Indic (٠–٩) digits, as phone keyboards type them, to 0–9. */
+export const asciiDigits = (s: string) =>
+  s.replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d))).replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
 
 export function formatNum(lang: Lang, v: string | number): string {
   if (typeof v === 'number' && lang === 'fa') return v.toLocaleString('fa-IR');

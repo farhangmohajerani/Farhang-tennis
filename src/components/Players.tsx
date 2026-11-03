@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useStore } from '../lib/store';
 import { LEVELS, type Player } from '../types';
-import { levelLabel } from '../lib/i18n';
+import { asciiDigits, levelLabel } from '../lib/i18n';
 import { uid } from '../lib/id';
 import { getSocial, reloadConnections } from '../lib/social';
 import { Badge, Button, ConfirmButton, cx, Field, inputCls, Modal, SectionTitle } from './ui';
@@ -51,7 +51,14 @@ export function PlayerForm({ initial, onDone }: { initial?: Player; onDone?: () 
         </Field>
       </div>
       <Field label={t('birthYear')} htmlFor={`pl-year-${p.id}`}>
-        <input id={`pl-year-${p.id}`} type="number" inputMode="numeric" className={inputCls} value={p.birthYear} onChange={(e) => setP({ ...p, birthYear: Number(e.target.value) || 0 })} />
+        <input
+          id={`pl-year-${p.id}`}
+          inputMode="numeric"
+          dir="ltr"
+          className={inputCls}
+          value={p.birthYear || ''}
+          onChange={(e) => setP({ ...p, birthYear: Number(asciiDigits(e.target.value).replace(/\D/g, '').slice(0, 4)) || 0 })}
+        />
       </Field>
       <Field label={t('level')} htmlFor={`pl-level-${p.id}`}>
         <select id={`pl-level-${p.id}`} className={inputCls} value={p.level} onChange={(e) => setP({ ...p, level: e.target.value as Player['level'] })}>

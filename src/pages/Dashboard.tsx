@@ -12,7 +12,7 @@ import { CoachRequestsBanner } from '../components/TeamPanel';
 import { FindCoachCard, FindPlayersCard, IncomingRequestsCard } from '../components/Social';
 import { getSocial } from '../lib/social';
 import { daysBetween, matchesOfPlayer } from '../lib/competition';
-import { ResultBadge, scoreLine, useCanChart } from '../components/MatchBits';
+import { LiveElsewhere, ResultBadge, scoreLine, useCanChart } from '../components/MatchBits';
 
 function MatchesCard({ playerId }: { playerId: string }) {
   const { state, t, lang } = useStore();
@@ -113,6 +113,7 @@ export function Dashboard() {
       <PageHeader eyebrow={plan?.name} title={t('nav_dashboard')} />
       <CoachRequestsBanner />
       <IncomingRequestsCard />
+      <LiveElsewhere />
       {state.settings.role === 'parent' && <FindCoachCard />}
 
       <div className="grid gap-5 lg:grid-cols-[1.5fr_1fr]">

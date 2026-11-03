@@ -205,7 +205,7 @@ export function Layout({ route, children }: { route: string; children: ReactNode
           <span data-testid="save-status">
             {saveStatus === 'saving' && '…'}
             {saveStatus === 'saved' && `✓ ${t('saved')}`}
-            {saveStatus === 'error' && <span className="text-bad">{t('syncError', { msg: saveError ?? '' })}</span>}
+            {saveStatus === 'error' && <span className="text-bad">{t('syncError', { msg: saveError === 'not_connected' ? t('changeNotSaved') : saveError ?? '' })}</span>}
           </span>
                   {getTeam() && (
             <span className="ms-2 inline-flex flex-wrap items-center gap-2">

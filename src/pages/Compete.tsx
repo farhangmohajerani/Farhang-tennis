@@ -9,7 +9,7 @@ import { chartedStats, daysBetween, evaluateTournament, makeTournament, matchesO
 import { METRIC_META, metricValue, summary } from '../lib/match';
 import { SURFACES, type GoalMetric, type Match, type Tournament } from '../types';
 import { Badge, Button, Card, cx, Empty, Field, Icon, inputCls, PageHeader, SectionTitle } from '../components/ui';
-import { MatchRow, roundLabel, scoreLine, surfaceLabel, useCanChart, useCanEdit, useMatchRights } from '../components/MatchBits';
+import { MatchRow, roundLabel, scoreLine, surfaceLabel, useCanChart, useCanEdit, useMatchRights, LiveElsewhere } from '../components/MatchBits';
 import { Seg } from './MatchSetup';
 import { fmtMetric, metricLabel } from './TournamentDetail';
 
@@ -162,6 +162,7 @@ export function Compete({ tab }: { tab: 'matches' | 'tournaments' }) {
 
       {tab === 'matches' ? (
         <div className="flex flex-col gap-6">
+          <LiveElsewhere />
           {live.map((m) => (
             <a key={m.id} href={href(`match-${m.id}`)} className="flex flex-wrap items-center gap-3 rounded-2xl border border-bad/40 bg-bad-soft p-4" data-testid="live-banner">
               <Badge tone="bad"><span className="live-dot" aria-hidden="true" /> {t('live')}</Badge>
