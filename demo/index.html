@@ -1,24 +1,40 @@
 <!doctype html>
-<html lang="en" dir="ltr">
+<html lang="fa" dir="rtl">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex" />
     <meta name="theme-color" content="#0c1f38" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="21GRAM" />
     <title>21GRAM Tennis</title>
-    <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="icon" type="image/png" href="./icon-192.png" />
-    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="icon" type="image/png" href="../icon-192.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&family=Vazirmatn:wght@400;500;600;700&display=swap" />
-    <link rel="stylesheet" href="./app.css?v=102c6dd00a" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Manrope:wght@500;700&family=Vazirmatn:wght@400;600&display=swap" />
+    <style>
+      :root { color-scheme: dark; }
+      html, body { height: 100%; margin: 0; }
+      body { box-sizing: border-box; display: grid; place-items: center; padding: 24px 16px; background: #0c1f38; color: #f4f7fa; font-family: Vazirmatn, system-ui, sans-serif; }
+      main { max-width: 28rem; text-align: center; }
+      .brand { margin: 0 0 22px; direction: ltr; font: 700 12px/1 Manrope, system-ui, sans-serif; letter-spacing: 0.22em; color: #7cc3ce; }
+      .fa-title { margin: 0; font-size: 40px; font-weight: 600; line-height: 1.2; }
+      .en-title { margin: 6px 0 0; direction: ltr; font: 400 44px/1.1 "Instrument Serif", Georgia, serif; }
+      .rule { width: 48px; height: 2px; margin: 28px auto 0; border-radius: 2px; background: #7cc3ce; opacity: 0.7; }
+      .text { margin: 22px 0 0; font-size: 15px; line-height: 1.7; color: #9fb4c8; }
+      .text-en { margin: 4px 0 0; direction: ltr; font: 500 14.5px/1.6 Manrope, system-ui, sans-serif; color: #9fb4c8; }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
-    <noscript>21GRAM Tennis needs JavaScript.</noscript>
-    <script src="./app.js?v=102c6dd00a"></script>
+    <main>
+      <p class="brand">21GRAM TENNIS</p>
+      <h1 class="fa-title">به‌زودی</h1>
+      <p class="en-title" lang="en">Coming soon</p>
+      <div class="rule" aria-hidden="true"></div>
+      <p class="text">در حال آماده‌سازی نسخهٔ جدید هستیم.</p>
+      <p class="text-en" lang="en">We are getting a new version ready.</p>
+    </main>
+    <script>
+      // The old app's worker only showed notifications: remove it from this device.
+      if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(function (rs) { rs.forEach(function (r) { r.unregister(); }); }).catch(function () {});
+    </script>
   </body>
 </html>
