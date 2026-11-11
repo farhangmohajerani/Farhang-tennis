@@ -248,14 +248,9 @@ export function Layout({ route, children }: { route: string; children: ReactNode
             {saveStatus === 'saved' && `✓ ${t('saved')}`}
             {saveStatus === 'error' && <span className="text-bad">{t('syncError', { msg: saveError === 'not_connected' ? t('changeNotSaved') : saveError ?? '' })}</span>}
           </span>
-                  {getTeam() && (
+          {getTeam() && (
             <span className="ms-2 inline-flex flex-wrap items-center gap-2">
               · {t('signedInAs', { email: getTeam()!.myEmail })}
-              {social && (
-                <bdi dir="ltr" className="font-mono" data-testid="footer-username">
-                  @{social.me.username}
-                </bdi>
-              )}
               <button type="button" className="font-semibold text-accent" onClick={() => getTeam()!.signOut()} data-testid="sign-out">
                 {t('signOutBtn')}
               </button>

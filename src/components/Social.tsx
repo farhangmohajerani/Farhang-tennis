@@ -565,7 +565,8 @@ export function MembersPanel() {
   }, [social]);
   if (!social) return null;
   const coaches = (list ?? []).filter((m) => m.kind === 'coach').length;
-  const families = (list ?? []).filter((m) => m.kind === 'family').length;
+  const families = (list ?? []).filter((m) => m.kind === 'family' && m.holder !== 'player').length;
+  const selfPlayers = (list ?? []).filter((m) => m.kind === 'family' && m.holder === 'player').length;
   const needle = q.trim().toLowerCase();
   const shown = (list ?? []).filter((m) => !needle || m.displayName.toLowerCase().includes(needle) || m.email.toLowerCase().includes(needle));
   const run = async (fn: () => Promise<Result>, ok: string) => {
@@ -580,7 +581,7 @@ export function MembersPanel() {
   };
   return (
     <Card className="p-5" data-testid="members-panel">
-      <SectionTitle aside={list && <span className="num text-[13px] text-muted">{t('membersCounts', { c: coaches, f: families })}</span>}>{t('membersTitle')}</SectionTitle>
+      <SectionTitle aside={list && <span className="num text-[13px] text-muted">{t('membersCounts', { c: coaches, f: families, p: selfPlayers })}</span>}>{t('membersTitle')}</SectionTitle>
       <p className="mb-3 text-[13px] text-muted">{t('membersHelp')}</p>
       {list && list.length > 6 && (
         <input type="search" className={cx(inputCls, 'mb-3')} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('membersSearch')} aria-label={t('membersSearch')} data-testid="members-search" />
