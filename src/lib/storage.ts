@@ -121,15 +121,12 @@ export function supabaseConfig(): SupabaseConfig | null {
 }
 
 export interface SignupProfile {
-  username: string;
-  displayName: string;
-  birthYear?: number | null;
+  firstName: string;
+  lastName: string;
+  /** Player, family or coach. */
+  kind: 'coach' | 'family' | 'player';
   /** The privacy notice version accepted at sign-up. */
   consent?: string;
-  /** Families: a parent or guardian is making the account. */
-  guardian?: boolean;
-  /** Families: coaches may find them by name. */
-  discoverable?: boolean;
 }
 
 export class SupabaseAuth {
@@ -184,14 +181,7 @@ export class SupabaseAuth {
       data: {
         account_type: accountType,
         ...(profile
-          ? {
-              username: profile.username,
-              display_name: profile.displayName,
-              birth_year: profile.birthYear ?? null,
-              consent_version: profile.consent ?? null,
-              guardian: profile.guardian === true,
-              discoverable: profile.discoverable === true,
-            }
+          ? { first_name: profile.firstName, last_name: profile.lastName, signup_kind: profile.kind, consent_version: profile.consent ?? null }
           : {}),
       },
     });
@@ -215,17 +205,15 @@ export class SupabaseAuth {
   }
 
   /** What was typed at sign-up, if anything. */
-  signupProfile(): SignupProfile & { kind: 'coach' | 'family' | null } {
+  signupProfile(): { kind: 'coach' | 'family' | 'player' | null; firstName: string; lastName: string; consent?: string } {
     const m = this.metadata() ?? {};
+    const k = m.signup_kind;
     const t = this.accountType();
     return {
-      kind: t === 'coach' ? 'coach' : t === 'parent' ? 'family' : null,
-      username: typeof m.username === 'string' ? m.username : '',
-      displayName: typeof m.display_name === 'string' ? m.display_name : '',
-      birthYear: typeof m.birth_year === 'number' ? m.birth_year : null,
+      kind: k === 'coach' || k === 'family' || k === 'player' ? k : t === 'coach' ? 'coach' : t === 'parent' ? 'family' : null,
+      firstName: typeof m.first_name === 'string' ? m.first_name : '',
+      lastName: typeof m.last_name === 'string' ? m.last_name : '',
       consent: typeof m.consent_version === 'string' ? m.consent_version : undefined,
-      guardian: m.guardian === true,
-      discoverable: m.discoverable === true,
     };
   }
 

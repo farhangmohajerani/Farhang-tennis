@@ -1,15 +1,15 @@
 /**
- * Settings (online version): profile and username, notifications on this device, privacy choices,
- * the family's player details, password, privacy notice, sign out and deleting the account.
+ * Settings (online version): a link to the profile, notifications on this device, privacy choices,
+ * password, privacy notice, sign out and deleting the account.
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import { useStore } from '../lib/store';
-import { asciiDigits } from '../lib/i18n';
-import { cleanUsername, getSocial, USERNAME_RE, type PlayerPatch } from '../lib/social';
+import { navigate } from '../lib/router';
+import { getSocial, type PlayerPatch } from '../lib/social';
 import { getTeam } from '../lib/team';
 import { disablePush, enablePush, isIOS, pushState, type PushState } from '../lib/push';
-import { Badge, Button, cx, inputCls, Modal, Switch } from './ui';
-import { Handle, useMe, useSocialError, VerifiedBadge } from './Social';
+import { Badge, Button, cx, Modal, Switch } from './ui';
+import { useMe, useSocialError, VerifiedBadge } from './Social';
 import { PrivacyNoticeBody } from './PrivacyNotice';
 
 /** This device's notification state; null while it is being checked. */
@@ -123,32 +123,11 @@ export function SettingsModal({ onClose, onChangePassword, onDelete }: { onClose
   const team = getTeam();
   const errText = useSocialError();
   const [view, setView] = useState<'main' | 'privacy'>('main');
-  const [name, setName] = useState(me?.displayName ?? '');
-  const [username, setUsername] = useState(me?.username ?? '');
-  const [userStatus, setUserStatus] = useState<'checking' | 'available' | 'taken' | null>(null);
   const [busy, setBusy] = useState('');
   const own = state.players.find((p) => p.id === adapter.myId);
-  const [details, setDetails] = useState({ birthYear: String(own?.birthYear ?? ''), hand: own?.hand ?? 'right', backhand: own?.backhand ?? 'two' });
-  useEffect(() => {
-    if (!social || !me || username === me.username || !USERNAME_RE.test(username)) return setUserStatus(null);
-    setUserStatus('checking');
-    let live = true;
-    const timer = setTimeout(() => {
-      social
-        .usernameAvailable(username)
-        .then((ok) => live && setUserStatus(ok ? 'available' : 'taken'))
-        .catch(() => live && setUserStatus(null));
-    }, 350);
-    return () => {
-      live = false;
-      clearTimeout(timer);
-    };
-  }, [username, social, me]);
   if (!social || !me) return null;
   const family = me.kind === 'family';
-  const year = new Date().getFullYear();
-  const by = Number(details.birthYear);
-  const yearOk = /^\d{4}$/.test(details.birthYear) && by >= year - 90 && by <= year - 3;
+  const self = me.holder === 'player';
 
   const save = async (key: string, fn: () => Promise<{ error?: string; ok?: boolean } | null>, done: string) => {
     setBusy(key);
@@ -180,120 +159,35 @@ export function SettingsModal({ onClose, onChangePassword, onDelete }: { onClose
   return (
     <Modal open onClose={onClose} title={t('settingsTitle')}>
       <div className="flex flex-col gap-5" data-testid="settings">
-        <div className="flex items-center gap-3">
+        <button
+          type="button"
+          className="flex items-center gap-3 rounded-2xl border border-line p-3 text-start hover:border-accent"
+          onClick={() => {
+            onClose();
+            navigate('profile');
+          }}
+          data-testid="settings-profile"
+        >
           <span className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-band font-display text-2xl text-band-ink" aria-hidden="true">
             {me.displayName.trim().charAt(0).toUpperCase() || '?'}
           </span>
-          <div className="min-w-0">
-            <p className="truncate text-lg font-semibold">
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-lg font-semibold">
               {me.displayName} {me.verified && <VerifiedBadge />}
-            </p>
-            <p className="flex flex-wrap items-center gap-x-2 text-[13px] text-muted">
-              <Handle u={me.username} />
-              <Badge tone={family ? 'band' : 'accent'}>{t(family ? 'kind_family' : 'kind_coach')}</Badge>
-            </p>
-            {team && (
-              <p className="truncate text-[12px] text-muted" dir="ltr">
-                {team.myEmail}
-              </p>
-            )}
-          </div>
-        </div>
-
-        <Group title={t(family ? 'settingsPlayer' : 'settingsProfile')} testId="settings-profile">
-          <label className="flex flex-col gap-1 py-3 text-[13px] font-semibold">
-            {t(family ? 'playerName' : 'yourName')}
-            <span className="flex gap-2">
-              <input className={inputCls} value={name} maxLength={60} onChange={(e) => setName(e.target.value)} dir="auto" data-testid="settings-name" />
-              <Button
-                size="sm"
-                variant="primary"
-                className="shrink-0 self-center"
-                disabled={busy !== '' || name.trim().length < 2 || name.trim() === me.displayName}
-                data-testid="settings-save-name"
-                onClick={() => void save('name', () => (family ? social.updatePlayer({ name: name.trim() }) : social.updateProfile({ displayName: name.trim() })), t('savedToast'))}
-              >
-                {t('save')}
-              </Button>
             </span>
-          </label>
-          <label className="flex flex-col gap-1 py-3 text-[13px] font-semibold">
-            {t('usernameLabel')}
-            <span className="flex gap-2">
-              <span className="flex min-w-0 flex-1 items-center rounded-xl border border-line bg-surface ps-3" dir="ltr">
-                <span className="text-muted">@</span>
-                <input
-                  className="min-w-0 flex-1 bg-transparent px-1 py-2 font-normal text-ink outline-none"
-                  value={username}
-                  onChange={(e) => setUsername(cleanUsername(e.target.value))}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  data-testid="settings-username"
-                />
-              </span>
-              <Button
-                size="sm"
-                variant="primary"
-                className="shrink-0 self-center"
-                disabled={busy !== '' || username === me.username || !USERNAME_RE.test(username) || userStatus === 'taken'}
-                data-testid="settings-save-username"
-                onClick={() => void save('username', () => social.changeUsername(username), t('usernameChanged', { u: username }))}
-              >
-                {t('save')}
-              </Button>
-            </span>
-            <span
-              className={cx(
-                'text-[12.5px] font-normal',
-                userStatus === 'taken' || (username && !USERNAME_RE.test(username)) ? 'font-semibold text-bad' : userStatus === 'available' ? 'font-semibold text-good' : 'text-muted',
+            <span className="flex flex-wrap items-center gap-x-2 text-[13px] text-muted">
+              <Badge tone={family ? 'band' : 'accent'}>{t(!family ? 'kind_coach' : self ? 'kind_player' : 'kind_family')}</Badge>
+              {team && (
+                <span className="truncate" dir="ltr">
+                  {team.myEmail}
+                </span>
               )}
-            >
-              {userStatus === 'taken' ? t('usernameTaken') : userStatus === 'available' ? t('usernameFree') : userStatus === 'checking' ? '…' : t('usernameChangeHint')}
             </span>
-          </label>
-          {family && own && (
-            <div className="flex flex-col gap-2 py-3" data-testid="settings-details">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                <label className="col-span-2 flex flex-col gap-1 text-[12.5px] font-semibold sm:col-span-1">
-                  {t('birthYear')}
-                  <input
-                    className={inputCls}
-                    inputMode="numeric"
-                    dir="ltr"
-                    value={details.birthYear}
-                    onChange={(e) => setDetails({ ...details, birthYear: asciiDigits(e.target.value).replace(/\D/g, '').slice(0, 4) })}
-                    data-testid="settings-birthyear"
-                  />
-                </label>
-                <label className="flex flex-col gap-1 text-[12.5px] font-semibold">
-                  {t('hand')}
-                  <select className={inputCls} value={details.hand} onChange={(e) => setDetails({ ...details, hand: e.target.value as 'right' | 'left' })} data-testid="settings-hand">
-                    <option value="right">{t('rightHanded')}</option>
-                    <option value="left">{t('leftHanded')}</option>
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1 text-[12.5px] font-semibold">
-                  {t('backhandType')}
-                  <select className={inputCls} value={details.backhand} onChange={(e) => setDetails({ ...details, backhand: e.target.value as 'one' | 'two' })} data-testid="settings-backhand">
-                    <option value="two">{t('twoHanded')}</option>
-                    <option value="one">{t('oneHanded')}</option>
-                  </select>
-                </label>
-              </div>
-              <Button
-                size="sm"
-                className="self-end"
-                disabled={busy !== '' || !yearOk || (by === own.birthYear && details.hand === own.hand && details.backhand === own.backhand)}
-                data-testid="settings-save-details"
-                onClick={() => void patchPlayer({ birthYear: by, hand: details.hand, backhand: details.backhand }, t('savedToast'))}
-              >
-                {t('save')}
-              </Button>
-            </div>
-          )}
-        </Group>
+            <span className="mt-0.5 block text-[13px] font-semibold text-accent">{t('editProfile')} ›</span>
+          </span>
+        </button>
 
+        {!self && (
         <Group title={t('settingsNotifications')} testId="settings-notifications">
           <Switch
             checked={me.notifyLive}
@@ -309,13 +203,14 @@ export function SettingsModal({ onClose, onChangePassword, onDelete }: { onClose
             </div>
           )}
         </Group>
+        )}
 
         {family && (
           <Group title={t('settingsPrivacy')} testId="settings-privacy">
             <Switch
               checked={me.discoverable}
               onChange={(v) => void save('discover', () => social.updateProfile({ discoverable: v }), t('savedToast'))}
-              label={t('discoverLabel')}
+              label={t(self ? 'discoverLabelSelf' : 'discoverLabel')}
               hint={t('discoverHint')}
               disabled={busy !== ''}
               data-testid="settings-discoverable"
@@ -334,6 +229,17 @@ export function SettingsModal({ onClose, onChangePassword, onDelete }: { onClose
         )}
 
         <Group title={t('settingsAccount')} testId="settings-account">
+          <button
+            type="button"
+            className={rowBtn}
+            onClick={() => {
+              onClose();
+              navigate('profile');
+            }}
+            data-testid="settings-edit-profile"
+          >
+            {t('editProfile')} <span className="text-muted" aria-hidden="true">›</span>
+          </button>
           <button type="button" className={rowBtn} onClick={onChangePassword} data-testid="settings-password">
             {t('changePassword')} <span className="text-muted" aria-hidden="true">›</span>
           </button>

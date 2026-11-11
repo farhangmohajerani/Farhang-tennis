@@ -135,11 +135,14 @@ export async function handle(req: Request, env: Env, send: Sender = sendPush): P
     const coaches = await get<{ coach_id: string }>(`/rest/v1/connections?select=coach_id&family_id=eq.${playerId}&status=eq.accepted`);
     const people = [...new Set([playerId, ...coaches.map((c) => c.coach_id)])].filter((id) => id !== uid && UUID.test(id));
     if (!people.length) return reply({ ok: true, sent: 0 });
-    const profiles = await get<{ user_id: string; display_name: string; notify_live: boolean; blocked: boolean }>(
-      `/rest/v1/profiles?select=user_id,display_name,notify_live,blocked&user_id=in.(${[...people, uid].join(',')})`,
+    const profiles = await get<{ user_id: string; display_name: string; notify_live: boolean; blocked: boolean; holder: string | null }>(
+      `/rest/v1/profiles?select=user_id,display_name,notify_live,blocked,holder&user_id=in.(${[...people, uid].join(',')})`,
     );
     const starter = profiles.find((p) => p.user_id === uid)?.display_name ?? '';
-    const allowed = profiles.filter((p) => p.user_id !== uid && p.notify_live && !p.blocked).map((p) => p.user_id);
+    // A player who holds their own account is on court: only parents and coaches are told.
+    const allowed = profiles
+      .filter((p) => p.user_id !== uid && p.notify_live && !p.blocked && !(p.user_id === playerId && p.holder === 'player'))
+      .map((p) => p.user_id);
     if (!allowed.length) return reply({ ok: true, sent: 0 });
     const player = await get<{ data: { name?: string } }>(`/rest/v1/docs?select=data&path=eq.${enc(`academy/data/players/${playerId}`)}`);
     const playerName = String(player[0]?.data?.name ?? '');

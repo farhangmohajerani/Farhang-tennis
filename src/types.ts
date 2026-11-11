@@ -29,6 +29,8 @@ export const CATEGORY_TARGETS: Record<Category, number> = {
 };
 
 export const LEVELS = ['beginner', 'intermediate', 'advanced', 'professional'] as const;
+export const YEARS_PLAYING = ['<1', '1-3', '3-5', '5+'] as const;
+export const YEARS_COACHING = ['0-2', '3-5', '6-10', '10+'] as const;
 export type Level = (typeof LEVELS)[number];
 
 export const KPI_KEYS = ['attempt', 'decision', 'execution'] as const;
@@ -92,10 +94,11 @@ export type Role = (typeof ROLES)[number];
 export const PlayerSchema = z.object({
   id: nonEmpty,
   name: nonEmpty,
-  birthYear: z.number().int(),
-  level: z.enum(LEVELS),
-  hand: z.enum(['right', 'left']),
-  backhand: z.enum(['one', 'two']),
+  /** Empty until someone answers it (sign-up asks only the name; the profile asks the rest). */
+  birthYear: z.number().int().nullable().default(null),
+  level: z.enum(LEVELS).nullable().default(null),
+  hand: z.enum(['right', 'left']).nullable().default(null),
+  backhand: z.enum(['one', 'two']).nullable().default(null),
   coachId: z.string(),
   parentId: z.string(),
   /** claude.ai user ids of parents who may follow this player (read-only). */
@@ -109,6 +112,8 @@ export const PlayerSchema = z.object({
   ownerId: z.string().optional(),
   /** Usernames mode: the family allows AI match analysis (statistics only, no names). */
   aiConsent: z.boolean().optional(),
+  /** Profile: how long the player has played. */
+  yearsPlaying: z.enum(YEARS_PLAYING).optional(),
 });
 export type Player = z.infer<typeof PlayerSchema>;
 

@@ -76,7 +76,7 @@ export function ParentView() {
   const coach = state.people.find((p) => p.id === player.coachId);
   const ownPlan = plansForPlayer(state, player.id).find((p) => p.owner === 'parent');
   const conflicts = plan ? findConflicts(plan.sessions, state.tournaments) : [];
-  const levels = state.settings.levelDefaults[player.level];
+  const levels = state.settings.levelDefaults[player.level ?? 'beginner'];
 
   const startOwn = () => {
     if (!plan) return;

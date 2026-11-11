@@ -148,9 +148,15 @@ export function Layout({ route, children }: { route: string; children: ReactNode
             ) : (
               <strong className="font-semibold">{player?.name ?? '—'}</strong>
             )}
-            {player && (
+            {player && (player.birthYear || player.hand || player.backhand) && (
               <span className="text-muted">
-                {t('age', { n: new Date().getFullYear() - player.birthYear })} · {t(player.hand === 'right' ? 'handRShort' : 'handLShort')} · {t(player.backhand === 'two' ? 'bh2Short' : 'bh1Short')}
+                {[
+                  player.birthYear ? t('age', { n: new Date().getFullYear() - player.birthYear }) : '',
+                  player.hand ? t(player.hand === 'right' ? 'handRShort' : 'handLShort') : '',
+                  player.backhand ? t(player.backhand === 'two' ? 'bh2Short' : 'bh1Short') : '',
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
               </span>
             )}
             {canManage && social && (

@@ -1,5 +1,5 @@
 /**
- * Usernames and connections (Supabase): find a player or a coach by username, send a request,
+ * Connections (Supabase): find a player, a family or a coach by first and last name, send a request,
  * answer requests, and disconnect. Families see exactly what a coach may do before they allow it.
  * The database decides what each side then sees.
  */
@@ -83,11 +83,16 @@ export function useAct() {
   };
 }
 
-export function Handle({ u, className }: { u: string; className?: string }) {
+/** Under a name: what kind of account it is and, for a coach, the club and city (to tell people apart). */
+export function WhoLine({ p, className }: { p: { kind: 'coach' | 'family'; holder?: 'parent' | 'player' | null; club?: string | null; city?: string | null }; className?: string }) {
+  const { t } = useStore();
+  const kind = p.kind === 'coach' ? t('kind_coach') : p.holder === 'player' ? t('kind_player') : t('kind_family');
+  const where = [p.club, p.city].filter(Boolean).join(' · ');
   return (
-    <bdi dir="ltr" className={cx('font-mono text-[13px] text-muted', className)}>
-      @{u}
-    </bdi>
+    <span className={cx('block truncate text-[13px] text-muted', className)}>
+      {kind}
+      {where && ` · ${where}`}
+    </span>
   );
 }
 
@@ -101,19 +106,7 @@ export function VerifiedBadge() {
   );
 }
 
-/** "Your username: @yaman — share it so they can find you." */
-export function MyUsername() {
-  const { t } = useStore();
-  const me = useMe();
-  if (!me) return null;
-  return (
-    <p className="mb-3 rounded-xl bg-sunken px-3 py-2 text-[13px]" data-testid="my-username">
-      {t('myUsernameLabel')} <Handle u={me.username} className="font-semibold text-ink" /> · <span className="text-muted">{t('shareUsername')}</span>
-    </p>
-  );
-}
-
-type CoachRef = { username: string; displayName: string; verified?: boolean };
+type CoachRef = { username: string; displayName: string; verified?: boolean; kind?: 'coach' | 'family'; club?: string | null; city?: string | null };
 
 /**
  * Before a family lets a coach in (accepting their request, or asking them): what the coach will be
@@ -141,7 +134,7 @@ export function AllowCoachSheet({ coach, mode, onClose, onDone }: { coach: Coach
             <p className="font-semibold">
               {coach.displayName} {coach.verified && <VerifiedBadge />}
             </p>
-            <Handle u={coach.username} />
+            <WhoLine p={{ kind: 'coach', club: coach.club, city: coach.city }} />
           </div>
         </div>
         <section>
@@ -188,7 +181,7 @@ export function AllowCoachSheet({ coach, mode, onClose, onDone }: { coach: Coach
                 if (own && ai !== (own.aiConsent === true)) await social.updatePlayer({ aiConsent: ai }).catch(() => null);
                 const r = await act(
                   () => (mode === 'accept' ? social.respond(coach.username, true) : social.send(coach.username)),
-                  (x) => t(mode === 'accept' || x.status === 'accepted' ? 'connectedWith' : 'requestSent', { u: coach.username }),
+                  (x) => t(mode === 'accept' || x.status === 'accepted' ? 'connectedWith' : 'requestSent', { u: coach.displayName }),
                 );
                 if (r) {
                   if (mode === 'accept' || r.status === 'accepted') social.refresh();
@@ -250,8 +243,8 @@ export function PeopleSearch({ autoFocus }: { autoFocus?: boolean }) {
         className={inputCls}
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder={t(family ? 'searchCoach' : 'searchUsername')}
-        aria-label={t(family ? 'searchCoach' : 'searchUsername')}
+        placeholder={t(family ? 'searchCoach' : 'searchPlayerName')}
+        aria-label={t(family ? 'searchCoach' : 'searchPlayerName')}
         autoCapitalize="none"
         autoCorrect="off"
         autoComplete="off"
@@ -275,7 +268,7 @@ export function PeopleSearch({ autoFocus }: { autoFocus?: boolean }) {
                 <p className="truncate font-semibold">
                   {h.displayName} {h.verified && <VerifiedBadge />}
                 </p>
-                <Handle u={h.username} />
+                <WhoLine p={h} />
               </div>
               {h.status === 'accepted' ? (
                 <Badge tone="good">✓ {t('connectedBadge')}</Badge>
@@ -288,7 +281,7 @@ export function PeopleSearch({ autoFocus }: { autoFocus?: boolean }) {
                   data-testid={`accept-${h.username}`}
                   onClick={async () => {
                     if (family) return setSheet({ hit: h, mode: 'accept' });
-                    const r = await act(() => social.respond(h.username, true), () => t('connectedWith', { u: h.username }));
+                    const r = await act(() => social.respond(h.username, true), () => t('connectedWith', { u: h.displayName }));
                     if (r) {
                       mark(h.username, 'accepted', 'in');
                       social.refresh();
@@ -306,7 +299,7 @@ export function PeopleSearch({ autoFocus }: { autoFocus?: boolean }) {
                     if (family) return setSheet({ hit: h, mode: 'send' });
                     const r = await act(
                       () => social.send(h.username),
-                      (x) => t(x.status === 'accepted' ? 'connectedWith' : 'requestSent', { u: h.username }),
+                      (x) => t(x.status === 'accepted' ? 'connectedWith' : 'requestSent', { u: h.displayName }),
                     );
                     if (r) mark(h.username, r.status === 'accepted' ? 'accepted' : 'pending', 'out');
                   }}
@@ -351,9 +344,10 @@ export function RequestsList({ only }: { only?: 'in' | 'out' }) {
               <li key={c.username} className="flex flex-wrap items-center gap-2" data-testid={`req-in-${c.username}`}>
                 <div className="min-w-0 flex-1">
                   <p className="font-semibold">
-                    {c.displayName} {c.verified && <VerifiedBadge />} <Handle u={c.username} />
+                    {c.displayName} {c.verified && <VerifiedBadge />}
                   </p>
-                  <p className="text-[13px] text-muted">{t(c.kind === 'coach' ? 'wantsToCoach' : 'wantsToJoin')}</p>
+                  <p className="text-[13px] text-muted">{t(c.kind === 'coach' ? 'wantsToCoach' : c.holder === 'player' ? 'wantsToJoinPlayer' : 'wantsToJoin')}</p>
+                  {c.kind === 'coach' && (c.club || c.city) && <WhoLine p={c} />}
                 </div>
                 <Button
                   size="sm"
@@ -362,7 +356,7 @@ export function RequestsList({ only }: { only?: 'in' | 'out' }) {
                   onClick={async () => {
                     // A family first sees what the coach may do.
                     if (c.kind === 'coach') return setSheet(c);
-                    const r = await act(() => social.respond(c.username, true), () => t('connectedWith', { u: c.username }));
+                    const r = await act(() => social.respond(c.username, true), () => t('connectedWith', { u: c.displayName }));
                     if (r) social.refresh();
                   }}
                 >
@@ -383,9 +377,7 @@ export function RequestsList({ only }: { only?: 'in' | 'out' }) {
             {out.map((c) => (
               <li key={c.username} className="flex flex-wrap items-center gap-2" data-testid={`req-out-${c.username}`}>
                 <div className="min-w-0 flex-1">
-                  <p className="font-semibold">
-                    {c.displayName} <Handle u={c.username} />
-                  </p>
+                  <p className="font-semibold">{c.displayName}</p>
                   <p className="text-[13px] text-muted">{t('waitingAnswer')}</p>
                 </div>
                 <Button size="sm" data-testid={`cancel-${c.username}`} onClick={() => void act(() => social.remove(c.username), () => t('requestCancelled'))}>
@@ -450,17 +442,19 @@ export function useOutgoingLink(offlineId: string): LinkRequest | undefined {
 }
 
 /** Disconnect from a coach or a player. */
-export function DisconnectButton({ username }: { username: string }) {
+export function DisconnectButton({ username, name }: { username: string; name?: string }) {
   const { t } = useStore();
   const social = getSocial();
   const act = useAct();
+  const conns = useConnections();
   if (!social) return null;
+  const who = name ?? conns?.find((c) => c.username === username)?.displayName ?? '';
   return (
     <ConfirmButton
       label={t('disconnect')}
       confirmLabel={t('disconnectConfirm')}
       onConfirm={() =>
-        void act(() => social.remove(username), () => t('disconnected', { u: username })).then((r) => {
+        void act(() => social.remove(username), () => t('disconnected', { u: who })).then((r) => {
           if (r) social.refresh();
         })
       }
@@ -483,10 +477,10 @@ export function MyCoaches() {
             <p className="font-semibold">
               {c.displayName} {c.verified && <VerifiedBadge />}
             </p>
-            <Handle u={c.username} />
+            <WhoLine p={c} />
           </div>
           <Badge tone="good">✓ {t('connectedBadge')}</Badge>
-          <DisconnectButton username={c.username} />
+          <DisconnectButton username={c.username} name={c.displayName} />
         </li>
       ))}
     </ul>
@@ -501,7 +495,6 @@ export function CoachesModal({ onClose }: { onClose: () => void }) {
   }, []);
   return (
     <Modal open onClose={onClose} title={t('myCoachesTitle')} wide>
-      <MyUsername />
       <LinkRequestsCard />
       <RequestsList />
       <MyCoaches />
@@ -534,7 +527,6 @@ export function FindCoachCard() {
     <Card className="mb-5 p-5" data-testid="find-coach-card">
       <SectionTitle>{t('findCoachTitle')}</SectionTitle>
       <p className="-mt-1 mb-2 text-[13px] text-muted">{t('findCoachHelp')}</p>
-      <MyUsername />
       <RequestsList only="out" />
       <PeopleSearch />
     </Card>
@@ -549,7 +541,6 @@ export function FindPlayersCard() {
     <Card className="mb-5 max-w-2xl p-5" data-testid="find-players-card">
       <SectionTitle>{t('findPlayersCard')}</SectionTitle>
       <p className="-mt-1 mb-2 text-[13px] text-muted">{t('findPlayersCardHelp')}</p>
-      <MyUsername />
       <RequestsList only="out" />
       <PeopleSearch />
     </Card>
@@ -576,7 +567,7 @@ export function MembersPanel() {
   const coaches = (list ?? []).filter((m) => m.kind === 'coach').length;
   const families = (list ?? []).filter((m) => m.kind === 'family').length;
   const needle = q.trim().toLowerCase();
-  const shown = (list ?? []).filter((m) => !needle || m.username.includes(needle) || m.displayName.toLowerCase().includes(needle) || m.email.toLowerCase().includes(needle));
+  const shown = (list ?? []).filter((m) => !needle || m.displayName.toLowerCase().includes(needle) || m.email.toLowerCase().includes(needle));
   const run = async (fn: () => Promise<Result>, ok: string) => {
     try {
       const r = await fn();
@@ -602,13 +593,13 @@ export function MembersPanel() {
             <li key={m.userId} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5 text-sm" data-testid={`member-${m.username}`}>
               <div className="min-w-0 flex-1 basis-56">
                 <p className="truncate font-semibold">
-                  {m.displayName} {m.verified && <VerifiedBadge />} <Handle u={m.username} />
+                  {m.displayName} {m.verified && <VerifiedBadge />}
                 </p>
                 <p className="truncate text-[12px] text-muted" dir="ltr">
                   {m.email} · {new Date(m.createdAt).toLocaleDateString(lang === 'fa' ? 'fa-IR' : 'en-GB')}
                 </p>
               </div>
-              <Badge tone={m.kind === 'coach' ? 'accent' : 'band'}>{t(m.kind === 'coach' ? 'kind_coach' : 'kind_family')}</Badge>
+              <Badge tone={m.kind === 'coach' ? 'accent' : 'band'}>{t(m.kind === 'coach' ? 'kind_coach' : m.holder === 'player' ? 'kind_player' : 'kind_family')}</Badge>
               {m.staff && <Badge tone="neutral">{t('staffBadge')}</Badge>}
               {m.blocked && <Badge tone="bad">{t('blockedBadge')}</Badge>}
               {!m.consentAt && <Badge tone="warn">{t('noConsentBadge')}</Badge>}
@@ -618,7 +609,7 @@ export function MembersPanel() {
                   <Button
                     size="sm"
                     data-testid={`verify-${m.username}`}
-                    onClick={() => void run(() => social.setFlags(m.username, { verified: !m.verified }), t(m.verified ? 'unverifiedToast' : 'verifiedToast', { u: m.username }))}
+                    onClick={() => void run(() => social.setFlags(m.username, { verified: !m.verified }), t(m.verified ? 'unverifiedToast' : 'verifiedToast', { u: m.displayName }))}
                   >
                     {t(m.verified ? 'unverifyBtn' : 'verifyBtn')}
                   </Button>
@@ -627,7 +618,7 @@ export function MembersPanel() {
                   <Button
                     size="sm"
                     data-testid={`block-${m.username}`}
-                    onClick={() => void run(() => social.setFlags(m.username, { blocked: !m.blocked }), t(m.blocked ? 'unblockedToast' : 'blockedToast', { u: m.username }))}
+                    onClick={() => void run(() => social.setFlags(m.username, { blocked: !m.blocked }), t(m.blocked ? 'unblockedToast' : 'blockedToast', { u: m.displayName }))}
                   >
                     {t(m.blocked ? 'unblockBtn' : 'blockBtn')}
                   </Button>
@@ -635,8 +626,8 @@ export function MembersPanel() {
                 {!m.staff && m.userId !== social.myId && (
                   <ConfirmButton
                     label={t('removeAccountBtn')}
-                    confirmLabel={t('removeAccountConfirm', { u: m.username })}
-                    onConfirm={() => void run(() => social.removeAccount(m.userId), t('removedToast', { u: m.username }))}
+                    confirmLabel={t('removeAccountConfirm', { u: m.displayName })}
+                    onConfirm={() => void run(() => social.removeAccount(m.userId), t('removedToast', { u: m.displayName }))}
                   />
                 )}
               </div>

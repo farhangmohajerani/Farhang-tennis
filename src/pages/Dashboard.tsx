@@ -10,7 +10,7 @@ import { Badge, Card, Empty, Icon, KpiTile, PageHeader, SectionTitle } from '../
 import { PlayerForm } from '../components/Players';
 import { ParentConnect } from '../components/ParentLink';
 import { CoachRequestsBanner } from '../components/TeamPanel';
-import { CoachesModal, FindCoachCard, FindPlayersCard, Handle, IncomingRequestsCard, useMe, useSocialState, VerifiedBadge } from '../components/Social';
+import { CoachesModal, FindCoachCard, FindPlayersCard, IncomingRequestsCard, useMe, useSocialState, VerifiedBadge, WhoLine } from '../components/Social';
 import { getSocial } from '../lib/social';
 import { Guide, NotifyPrompt, PlanSwitcher, usePlanChoice } from '../components/Onboarding';
 import { daysBetween, matchesOfPlayer } from '../lib/competition';
@@ -94,7 +94,7 @@ function FamilyHome() {
   const name = player?.name ?? me?.displayName ?? '';
   return (
     <div data-testid="family-home">
-      <PageHeader eyebrow={t('familyEyebrow')} title={name} />
+      <PageHeader eyebrow={t(me?.holder === 'player' ? 'selfEyebrow' : 'familyEyebrow')} title={name} />
       <Guide />
       <IncomingRequestsCard />
       <NotifyPrompt />
@@ -170,10 +170,9 @@ function FamilyHome() {
               {coaches.length ? (
                 <ul className="flex flex-col gap-2">
                   {coaches.map((c) => (
-                    <li key={c.username} className="flex flex-wrap items-center gap-x-2">
-                      <span className="font-semibold">{c.displayName}</span>
-                      {c.verified && <VerifiedBadge />}
-                      <Handle u={c.username} />
+                    <li key={c.username}>
+                      <span className="font-semibold">{c.displayName}</span> {c.verified && <VerifiedBadge />}
+                      <WhoLine p={c} />
                     </li>
                   ))}
                 </ul>
@@ -249,7 +248,7 @@ export function Dashboard() {
   const done = sessions.filter((s) => s.status === 'completed').length;
   const logs = playerLogs(state, player.id);
   const practice = stats(logs.filter((l) => l.context !== 'match'));
-  const levels = state.settings.levelDefaults[player.level];
+  const levels = state.settings.levelDefaults[player.level ?? 'beginner'];
   const tournaments = state.tournaments.filter((x) => x.playerId === player.id && x.end >= today);
   const conflicts = plan ? findConflicts(plan.sessions, state.tournaments) : [];
   const isCoach = state.settings.role !== 'parent';

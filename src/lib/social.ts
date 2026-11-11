@@ -1,14 +1,32 @@
 /**
- * Usernames and connections (Supabase, supabase/social.sql and social-2.sql). A coach finds players by
- * username and sends a request; a family finds coaches the same way; once accepted they are connected.
+ * Accounts and connections (Supabase, supabase/social.sql, social-2.sql and social-3.sql). People find
+ * each other by first and last name and send a request; once accepted they are connected.
  */
 export type Kind = 'coach' | 'family';
+/** Who holds a family-type account: a parent (for one player) or the player themself. */
+export type Holder = 'parent' | 'player';
+/** What people choose at sign-up. */
+export type SignupKind = 'coach' | 'family' | 'player';
 export interface Profile {
+  /** A hidden internal id (never shown): the requests use it. */
   username: string;
   displayName: string;
   kind: Kind;
+  holder?: Holder | null;
+}
+/** Optional profile answers (coach: club, city, years coaching, certifications, bio; family: parent's name). */
+export interface ProfileDetails {
+  club?: string;
+  city?: string;
+  yearsCoaching?: '0-2' | '3-5' | '6-10' | '10+';
+  certifications?: string;
+  bio?: string;
+  parentName?: string;
 }
 export interface MyProfile extends Profile {
+  firstName: string;
+  lastName: string;
+  details: ProfileDetails;
   /** Families: coaches may find them by name (otherwise only by exact username). Coaches always. */
   discoverable: boolean;
   /** "Match started" notifications. */
@@ -23,6 +41,9 @@ export interface MyProfile extends Profile {
 }
 export interface SearchHit extends Profile {
   verified: boolean;
+  /** Coaches: their club and city, to tell two people with the same name apart. */
+  club?: string | null;
+  city?: string | null;
   /** Between you and them, if anything. */
   status: 'pending' | 'accepted' | null;
   /** 'out' = you asked, 'in' = they asked. */
@@ -30,6 +51,8 @@ export interface SearchHit extends Profile {
 }
 export interface Connection extends Profile {
   verified: boolean;
+  club?: string | null;
+  city?: string | null;
   status: 'pending' | 'accepted';
   direction: 'in' | 'out';
   /** The player's id (a family account's id). */
@@ -63,8 +86,11 @@ export type Result = { status?: string; ok?: boolean; moved?: number; error?: st
 export interface PlayerPatch {
   name?: string;
   birthYear?: number;
+  level?: 'beginner' | 'intermediate' | 'advanced' | 'professional';
   hand?: 'right' | 'left';
   backhand?: 'one' | 'two';
+  yearsPlaying?: '<1' | '1-3' | '3-5' | '5+';
+  goals?: string;
   aiConsent?: boolean;
 }
 
@@ -84,9 +110,7 @@ export interface Social {
   respondLink(id: string, accept: boolean): Promise<Result>;
   /** Admin: move it at once. */
   merge(offlinePlayerId: string, username: string): Promise<Result>;
-  updateProfile(p: { displayName?: string; discoverable?: boolean; notifyLive?: boolean }): Promise<Result>;
-  changeUsername(username: string): Promise<Result>;
-  usernameAvailable(username: string): Promise<boolean>;
+  updateProfile(p: { firstName?: string; lastName?: string; details?: ProfileDetails; discoverable?: boolean; notifyLive?: boolean }): Promise<Result>;
   /** Family: their player's own details and the AI-analysis choice. */
   updatePlayer(patch: PlayerPatch): Promise<Result>;
   /** Family: hide a match they charted. */
@@ -109,11 +133,8 @@ export const setSocial = (s: Social) => {
 };
 export const getSocial = () => current;
 
-/** Usernames: 3–24 of a–z, 0–9, '.', '_', starting with a letter or digit. */
-export const USERNAME_RE = /^[a-z0-9][a-z0-9_.]{2,23}$/;
-export const cleanUsername = (v: string) => v.toLowerCase().replace(/[^a-z0-9_.]/g, '').slice(0, 24);
 /** The privacy notice people accept; a new version would be asked again. */
-export const CONSENT_VERSION = 'privacy-2026-11';
+export const CONSENT_VERSION = 'privacy-2026-11b';
 
 /* ---- Connections and link requests, shared by the top bar, the dashboard and the people screens ---- */
 let conns: Connection[] | null = null;
@@ -180,3 +201,20 @@ export function profileChanged() {
 
 /** Requests waiting for this person's answer. */
 export const incoming = (list: Connection[] | null) => (list ?? []).filter((c) => c.status === 'pending' && c.direction === 'in');
+
+/** A name everyone can read: first name, last name. */
+export const nameOf = (p: { displayName: string }) => p.displayName;
+
+/** How many of the profile questions are answered (a player's own questions, or a coach's). */
+export function profileProgress(
+  me: Pick<MyProfile, 'kind' | 'details'>,
+  player?: { birthYear: number | null; level: string | null; hand: string | null; backhand: string | null } | null,
+): { done: number; total: number } {
+  if (me.kind === 'coach') {
+    const d = me.details ?? {};
+    const answers = [d.club, d.city, d.yearsCoaching];
+    return { done: answers.filter(Boolean).length, total: answers.length };
+  }
+  const answers = [player?.birthYear, player?.level, player?.hand, player?.backhand];
+  return { done: answers.filter((x) => x !== null && x !== undefined).length, total: answers.length };
+}

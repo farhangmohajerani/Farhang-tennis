@@ -6,17 +6,18 @@ import { uid } from '../lib/id';
 import { getSocial, reloadConnections } from '../lib/social';
 import { Badge, Button, ConfirmButton, cx, Field, inputCls, Modal, SectionTitle } from './ui';
 import { ParentLinks } from './ParentLink';
-import { DisconnectButton, Handle, MyUsername, PeopleSearch, RequestsList, useConnections, useOutgoingLink, useSocialError } from './Social';
+import { DisconnectButton, PeopleSearch, RequestsList, useConnections, useOutgoingLink, useSocialError } from './Social';
 
 /** ownerId: usernames mode — a player without an account belongs to the coach who added it. */
 function blankPlayer(ownerId?: string | null): Player {
   return {
     id: uid('player'),
     name: '',
-    birthYear: new Date().getFullYear() - 12,
-    level: 'beginner',
-    hand: 'right',
-    backhand: 'two',
+    // Nothing is assumed: left empty until someone answers.
+    birthYear: null,
+    level: null,
+    hand: null,
+    backhand: null,
     coachId: '',
     parentId: '',
     parentIds: [],
@@ -31,7 +32,7 @@ export function PlayerForm({ initial, onDone }: { initial?: Player; onDone?: () 
   const owner = adapter.social ? adapter.myId : null;
   const [p, setP] = useState<Player>(initial ?? blankPlayer(owner));
   const year = new Date().getFullYear();
-  const valid = p.name.trim().length > 1 && p.birthYear > year - 90 && p.birthYear <= year - 3;
+  const valid = p.name.trim().length > 1 && (p.birthYear === null || (p.birthYear > year - 90 && p.birthYear <= year - 3));
   return (
     <form
       className="grid gap-3 sm:grid-cols-2"
@@ -56,25 +57,29 @@ export function PlayerForm({ initial, onDone }: { initial?: Player; onDone?: () 
           inputMode="numeric"
           dir="ltr"
           className={inputCls}
-          value={p.birthYear || ''}
-          onChange={(e) => setP({ ...p, birthYear: Number(asciiDigits(e.target.value).replace(/\D/g, '').slice(0, 4)) || 0 })}
+          value={p.birthYear ?? ''}
+          placeholder="—"
+          onChange={(e) => setP({ ...p, birthYear: Number(asciiDigits(e.target.value).replace(/\D/g, '').slice(0, 4)) || null })}
         />
       </Field>
       <Field label={t('level')} htmlFor={`pl-level-${p.id}`}>
-        <select id={`pl-level-${p.id}`} className={inputCls} value={p.level} onChange={(e) => setP({ ...p, level: e.target.value as Player['level'] })}>
+        <select id={`pl-level-${p.id}`} className={inputCls} value={p.level ?? ''} onChange={(e) => setP({ ...p, level: (e.target.value || null) as Player['level'] })}>
+          <option value="">{t('notAnswered')}</option>
           {LEVELS.map((l) => (
             <option key={l} value={l}>{levelLabel(lang, l)}</option>
           ))}
         </select>
       </Field>
       <Field label={t('hand')} htmlFor={`pl-hand-${p.id}`}>
-        <select id={`pl-hand-${p.id}`} className={inputCls} value={p.hand} onChange={(e) => setP({ ...p, hand: e.target.value as Player['hand'] })}>
+        <select id={`pl-hand-${p.id}`} className={inputCls} value={p.hand ?? ''} onChange={(e) => setP({ ...p, hand: (e.target.value || null) as Player['hand'] })}>
+          <option value="">{t('notAnswered')}</option>
           <option value="right">{t('rightHanded')}</option>
           <option value="left">{t('leftHanded')}</option>
         </select>
       </Field>
       <Field label={t('backhandType')} htmlFor={`pl-bh-${p.id}`}>
-        <select id={`pl-bh-${p.id}`} className={inputCls} value={p.backhand} onChange={(e) => setP({ ...p, backhand: e.target.value as Player['backhand'] })}>
+        <select id={`pl-bh-${p.id}`} className={inputCls} value={p.backhand ?? ''} onChange={(e) => setP({ ...p, backhand: (e.target.value || null) as Player['backhand'] })}>
+          <option value="">{t('notAnswered')}</option>
           <option value="two">{t('twoHanded')}</option>
           <option value="one">{t('oneHanded')}</option>
         </select>
@@ -118,7 +123,7 @@ function LinkToAccount({ player, onDone }: { player: Player; onDone: () => void 
         <select id={`link-${player.id}`} className={cx(inputCls, 'w-auto py-1.5 text-[13px]')} value={target} onChange={(e) => setTarget(e.target.value)}>
           {accounts.map((a) => (
             <option key={a.id} value={a.id}>
-              {a.name} (@{a.username})
+              {a.name}
             </option>
           ))}
         </select>
@@ -135,11 +140,11 @@ function LinkToAccount({ player, onDone }: { player: Player; onDone: () => void 
                 return;
               }
               if (admin) {
-                toast(t('linked', { n: r?.moved ?? 0, u: to.username }));
+                toast(t('linked', { n: r?.moved ?? 0, u: to.name }));
                 dispatch({ type: 'setActivePlayer', id: to.id });
                 social.refresh();
               } else {
-                toast(t('linkAsked', { u: to.username }));
+                toast(t('linkAsked', { u: to.name }));
               }
               void reloadConnections();
               onDone();
@@ -161,7 +166,7 @@ function LinkPending({ playerId }: { playerId: string }) {
   if (!social || !link) return null;
   return (
     <div className="flex w-full flex-wrap items-center gap-2 rounded-xl bg-warn-soft px-2.5 py-2 text-[13px]" data-testid={`link-pending-${playerId}`}>
-      <span className="min-w-0 flex-1 font-semibold text-warn">{t('linkWaiting', { u: link.familyUsername })}</span>
+      <span className="min-w-0 flex-1 font-semibold text-warn">{t('linkWaiting', { u: link.familyName })}</span>
       <Button
         size="sm"
         data-testid={`link-cancel-${playerId}`}
@@ -188,11 +193,12 @@ export function PlayersModal({ open, onClose }: { open: boolean; onClose: () => 
   const conns = useConnections();
   const year = new Date().getFullYear();
   const connected = (u?: string) => !!u && (conns ?? []).some((c) => c.username === u && c.status === 'accepted');
+  // Age and level, only what has been answered.
+  const facts = (p: Player) => [p.birthYear ? t('age', { n: year - p.birthYear }) : '', p.level ? levelLabel(lang, p.level) : ''].filter(Boolean).join(' · ');
   return (
     <Modal open={open} onClose={onClose} title={t('playersTitle')} wide>
       {social && (
         <>
-          <MyUsername />
           <RequestsList />
           <SectionTitle>{t('findPlayerTitle')}</SectionTitle>
           <p className="-mt-1 mb-2 text-[13px] text-muted">{t('findPlayerHelp')}</p>
@@ -227,17 +233,15 @@ export function PlayersModal({ open, onClose }: { open: boolean; onClose: () => 
                 {social ? (
                   <>
                     <span className="block">{p.name}</span>
-                    <span className="block text-[13px] font-normal text-muted">
-                      {p.accountId && p.username ? <Handle u={p.username} /> : <Badge tone="warn" className="whitespace-nowrap">{t('noAccountBadge')}</Badge>} · {t('age', { n: year - p.birthYear })} ·{' '}
-                      {levelLabel(lang, p.level)}
+                    <span className="flex flex-wrap items-center gap-x-1.5 text-[13px] font-normal text-muted">
+                      {p.accountId ? <Badge tone="good" className="whitespace-nowrap">{t('hasAccountBadge')}</Badge> : <Badge tone="warn" className="whitespace-nowrap">{t('noAccountBadge')}</Badge>}
+                      {facts(p) && <span>{facts(p)}</span>}
                     </span>
                   </>
                 ) : (
                   <>
                     {p.name}
-                    <span className="ms-2 text-[13px] font-normal text-muted">
-                      {t('age', { n: year - p.birthYear })} · {levelLabel(lang, p.level)}
-                    </span>
+                    {facts(p) && <span className="ms-2 text-[13px] font-normal text-muted">{facts(p)}</span>}
                   </>
                 )}
               </button>

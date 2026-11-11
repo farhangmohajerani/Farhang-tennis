@@ -12,6 +12,7 @@ import { Compete } from './pages/Compete';
 import { MatchPage } from './pages/MatchPage';
 import { MatchSetup } from './pages/MatchSetup';
 import { TournamentDetail } from './pages/TournamentDetail';
+import { ProfilePage } from './pages/Profile';
 
 export function App() {
   const { name, param } = useRoute();
@@ -50,6 +51,9 @@ export function App() {
       break;
     case 'tournament':
       page = <TournamentDetail id={param} key={param} />;
+      break;
+    case 'profile':
+      page = <ProfilePage welcome={param === 'welcome'} key={param} />;
       break;
     default:
       page = <Dashboard />;

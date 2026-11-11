@@ -12,13 +12,13 @@ const TEXT: Record<'en' | 'fa', { title: string; updated: string; sections: Sect
       { h: 'Who we are', p: '21GRAM Tennis is the training app of the 21GRAM tennis academy. For questions or requests about your data, ask your coach or the academy.' },
       {
         h: 'What we keep',
-        p: 'Your email and password (to sign in), your username and name. For a player: name, birth year, playing hand, and the training plans, session results, matches and notes that the family and its coaches add.',
+        p: 'Your email and password (to sign in) and your name. For a player: name and the answers given in the profile (birth year, level, playing hand…), and the training plans, session results, matches and notes that the player, the family and their coaches add. For a coach: the profile answers (club, city, experience).',
       },
       {
         h: 'Who can see it',
         p: 'Only you and the coaches you allow. A coach sees a player only after the family accepts, and can be disconnected at any time. Coaches never see your email or password, and families never see other families.',
       },
-      { h: 'Being found', p: 'Coaches can find a family only by its exact username, unless the family chooses to be found by name in Settings.' },
+      { h: 'Being found', p: 'People find each other by first and last name. A family or player can turn this off in Settings and still find and ask a coach. A coach sees nothing about a player until the family or player accepts.' },
       {
         h: 'Notifications',
         p: 'If you turn them on, this device gets a notification when a match of a player you are connected to starts. You can turn them off in Settings at any time.',
@@ -28,7 +28,7 @@ const TEXT: Record<'en' | 'fa', { title: string; updated: string; sections: Sect
         p: 'Only if the family allows it: a coach can send a match’s statistics and point log — never the player’s or the opponent’s name — to an AI service (OpenAI or Google Gemini) to write a short analysis.',
       },
       { h: 'Where it is stored', p: 'In our database at Supabase, our hosting provider. We do not sell your data or show advertising.' },
-      { h: 'Players under 18', p: 'A parent or legal guardian makes and manages the account of a player under 18.' },
+      { h: 'Players under 16', p: 'A player under 16 joins through a family account that a parent or legal guardian makes and manages.' },
       {
         h: 'Your choices',
         p: 'You can change your details, disconnect a coach, turn off notifications or AI analysis, and delete your account with its data at any time in Settings.',
@@ -43,13 +43,13 @@ const TEXT: Record<'en' | 'fa', { title: string; updated: string; sections: Sect
       { h: 'ما چه کسی هستیم', p: '21GRAM Tennis اپ تمرینی آکادمی تنیس 21GRAM است. برای هر سؤال یا درخواست دربارهٔ اطلاعاتتان، به مربی‌تان یا آکادمی بگویید.' },
       {
         h: 'چه چیزی نگه می‌داریم',
-        p: 'ایمیل و رمز عبور (برای ورود)، نام کاربری و نام شما. برای بازیکن: نام، سال تولد، دست بازی، و برنامه‌های تمرین، نتیجهٔ جلسه‌ها، بازی‌ها و یادداشت‌هایی که خانواده و مربی‌هایش ثبت می‌کنند.',
+        p: 'ایمیل و رمز عبور (برای ورود) و نام شما. برای بازیکن: نام و جواب‌های پروفایل (سال تولد، سطح، دست بازی و…)، و برنامه‌های تمرین، نتیجهٔ جلسه‌ها، بازی‌ها و یادداشت‌هایی که بازیکن، خانواده و مربی‌هایش ثبت می‌کنند. برای مربی: جواب‌های پروفایل (باشگاه، شهر، سابقه).',
       },
       {
         h: 'چه کسی می‌بیند',
         p: 'فقط خودتان و مربی‌هایی که اجازه می‌دهید. مربی فقط بعد از تأیید خانواده بازیکن را می‌بیند و هر وقت بخواهید می‌توانید اتصال را قطع کنید. مربی‌ها هیچ‌وقت ایمیل و رمز شما را نمی‌بینند و خانواده‌ها هم خانواده‌های دیگر را نمی‌بینند.',
       },
-      { h: 'پیدا شدن', p: 'مربی‌ها خانواده را فقط با نام کاربری دقیقش پیدا می‌کنند، مگر اینکه خانواده در تنظیمات اجازه دهد با نام هم پیدا شود.' },
+      { h: 'پیدا شدن', p: 'افراد همدیگر را با نام و نام خانوادگی پیدا می‌کنند. خانواده یا بازیکن می‌تواند این را در تنظیمات خاموش کند و همچنان مربی را پیدا کند و درخواست بفرستد. مربی تا قبول خانواده یا بازیکن، هیچ اطلاعاتی از بازیکن نمی‌بیند.' },
       {
         h: 'اعلان‌ها',
         p: 'اگر روشنشان کنید، وقتی بازی بازیکنی که به او متصل هستید شروع شود، روی همین دستگاه اعلان می‌آید. هر وقت بخواهید در تنظیمات خاموششان کنید.',
@@ -59,7 +59,7 @@ const TEXT: Record<'en' | 'fa', { title: string; updated: string; sections: Sect
         p: 'فقط اگر خانواده اجازه دهد: مربی می‌تواند آمار و ثبت امتیازهای یک بازی را — بدون نام بازیکن یا حریف — برای یک سرویس هوش مصنوعی (OpenAI یا Google Gemini) بفرستد تا تحلیل کوتاهی بنویسد.',
       },
       { h: 'کجا نگه داشته می‌شود', p: 'در پایگاه دادهٔ ما در Supabase (سرویس میزبانی ما). اطلاعات شما را نمی‌فروشیم و تبلیغ نشان نمی‌دهیم.' },
-      { h: 'بازیکنان زیر ۱۸ سال', p: 'حساب بازیکن زیر ۱۸ سال را پدر، مادر یا سرپرست قانونی‌اش می‌سازد و مدیریت می‌کند.' },
+      { h: 'بازیکنان زیر ۱۶ سال', p: 'بازیکن زیر ۱۶ سال با حساب خانواده وارد می‌شود که پدر، مادر یا سرپرست قانونی‌اش می‌سازد و مدیریت می‌کند.' },
       {
         h: 'اختیار با شماست',
         p: 'هر وقت بخواهید در تنظیمات می‌توانید اطلاعاتتان را عوض کنید، اتصال مربی را قطع کنید، اعلان یا تحلیل هوش مصنوعی را خاموش کنید و حسابتان را با همهٔ اطلاعاتش حذف کنید.',

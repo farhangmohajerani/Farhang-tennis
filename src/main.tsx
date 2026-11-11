@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useState } from 'react';
+import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 import { App } from './App';
@@ -13,20 +13,20 @@ import { roomPairing, setPairing } from './lib/pairing';
 import { setTeam, type TeamMember } from './lib/team';
 import { setMyPlan } from './lib/access';
 import {
-  cleanUsername,
   CONSENT_VERSION,
   profileChanged,
   setSocial,
-  USERNAME_RE,
   type Connection,
+  type Holder,
   type LinkRequest,
   type Member,
   type MyProfile,
+  type ProfileDetails,
   type Result,
   type SearchHit,
+  type SignupKind,
   type Social,
 } from './lib/social';
-import { asciiDigits } from './lib/i18n';
 import { PrivacyNoticeOverlay } from './components/PrivacyNotice';
 import { disablePush, registerWorker, setPushKeySource, setPushUser, syncPush } from './lib/push';
 
@@ -63,8 +63,8 @@ const fa = (() => {
 })();
 const T = fa
   ? {
-      title: '21GRAM Tennis', sub: 'ورود مربی‌ها و خانواده‌ها', email: 'ایمیل', pass: 'رمز عبور (حداقل ۸ کاراکتر)',
-      signIn: 'ورود', signUp: 'ساخت حساب جدید', forgot: 'رمز را فراموش کرده‌ام', show: 'نمایش رمز', hide: 'پنهان کردن رمز',
+      title: '21GRAM Tennis', sub: 'تمرین، بازی و پیشرفت — برای بازیکن، خانواده و مربی', email: 'ایمیل', pass: 'رمز عبور (حداقل ۸ کاراکتر)',
+      signIn: 'ورود', signUp: 'ساخت حساب', forgot: 'رمز را فراموش کرده‌ام', show: 'نمایش رمز', hide: 'پنهان کردن رمز',
       sent: 'ایمیل بازیابی رمز فرستاده شد. روی لینک داخل ایمیل بزنید تا رمز جدید بگذارید.', newPass: 'رمز جدید (حداقل ۸ کاراکتر)',
       newPassTitle: 'رمز جدید بگذارید', save: 'ذخیرهٔ رمز و ورود', toggle: 'English',
       checkEmail: 'حساب ساخته شد. یک ایمیل تأیید برایتان فرستادیم؛ روی لینکش بزنید تا وارد شوید.',
@@ -73,27 +73,32 @@ const T = fa
       exists: 'با این ایمیل قبلاً حساب ساخته شده. «ورود» را بزنید.', notConfirmed: 'ایمیل هنوز تأیید نشده. روی لینک ایمیل تأیید بزنید.',
       expired: 'این لینک منقضی شده یا قبلاً استفاده شده. دوباره «رمز را فراموش کرده‌ام» را بزنید یا وارد شوید.',
       tooMany: 'تعداد درخواست‌ها زیاد بود. چند دقیقه صبر کنید و دوباره امتحان کنید.', passwordSaved: 'رمز ذخیره شد.',
-      tabSignIn: 'ورود', tabSignUp: 'ساخت حساب', whoAreYou: 'شما کدام هستید؟', coach: 'مربی', parent: 'خانواده / بازیکن',
-      coachHint: 'بعد از ورود، بازیکن‌هایتان را با نام کاربری‌شان پیدا می‌کنید و برایشان درخواست می‌فرستید.', parentHint: 'یک حساب برای یک بازیکن. بعد از ورود، مربی‌تان را با نام کاربری‌اش پیدا می‌کنید و درخواست می‌فرستید.',
-      pickType: 'اول انتخاب کنید مربی هستید یا خانواده.',
+      tabSignIn: 'ورود', tabSignUp: 'ساخت حساب', whoAreYou: 'با کدام حساب شروع می‌کنید؟',
+      kind_player: 'بازیکن', kind_player_text: 'خودم تنیس بازی می‌کنم و تمرین‌ها و بازی‌هایم را دنبال می‌کنم.',
+      kind_family: 'خانواده', kind_family_text: 'پدر یا مادر هستم و برای فرزندم حساب می‌سازم.',
+      kind_coach: 'مربی', kind_coach_text: 'مربی هستم؛ برای بازیکن‌هایم برنامه می‌سازم و بازی‌هایشان را ثبت می‌کنم.',
+      form_player: 'حساب بازیکن', form_family: 'حساب خانواده', form_coach: 'حساب مربی', change: 'تغییر',
+      firstName: 'نام', lastName: 'نام خانوادگی', childFirst: 'نام بازیکن (فرزندتان)', childLast: 'نام خانوادگی بازیکن',
+      familyNameHint: 'مربی‌ها بازیکن را با همین نام پیدا می‌کنند. بقیهٔ اطلاعات را بعداً در پروفایل وارد می‌کنید.',
+      laterHint: 'بقیهٔ اطلاعات را بعد از ساخت حساب در پروفایل وارد می‌کنید.',
+      legal_player: 'با ساخت حساب، {privacy} را می‌پذیرید و تأیید می‌کنید که ۱۶ سال یا بیشتر دارید (بازیکنان کوچک‌تر با حساب خانواده وارد می‌شوند).',
+      legal_family: 'با ساخت حساب، {privacy} را می‌پذیرید و تأیید می‌کنید که پدر، مادر یا سرپرست قانونی این بازیکن هستید.',
+      legal_coach: 'با ساخت حساب، {privacy} را می‌پذیرید.',
+      privacyLink: 'متن حریم خصوصی', pickType: 'اول انتخاب کنید بازیکن، خانواده یا مربی هستید.', needName: 'نام و نام خانوادگی را بنویسید.',
       pwHint: 'رمز عبور حداقل ۸ کاراکتر',
-      username: 'نام کاربری', usernameHint: 'حروف کوچک انگلیسی، عدد، نقطه یا _ — ۳ تا ۲۴ کاراکتر. مثلاً yaman',
-      yourName: 'نام شما', playerName: 'نام بازیکن', birthYear: 'سال تولد بازیکن (میلادی)', badYear: 'سال تولد درست نیست.',
-      setupTitle: 'نام کاربری خود را بسازید', setupText: 'مربی‌ها و خانواده‌ها همدیگر را با نام کاربری پیدا می‌کنند و به هم متصل می‌شوند.',
-      available: 'آزاد است ✓', taken: 'این نام کاربری قبلاً گرفته شده؛ یکی دیگر بنویسید.', checking: 'در حال بررسی…',
+      setupTitle: 'حسابتان را کامل کنید', setupText: 'فقط نوع حساب و نام لازم است؛ بقیه را بعداً در پروفایل جواب می‌دهید.',
       setupSave: 'ذخیره و ادامه', setupFailed: 'ذخیره نشد. اینترنت را چک کنید و دوباره امتحان کنید.', adminCoach: 'حساب مدیر به‌عنوان مربی هم کار می‌کند.',
       signOut: 'خروج', deleted: 'حساب شما حذف شد.',
       agree: 'متن حریم خصوصی را خواندم و قبول دارم.', readNotice: 'خواندن متن',
-      guardian: 'من پدر، مادر یا سرپرست قانونی بازیکن هستم (یا خودم بازیکنم و ۱۸ سال یا بیشتر دارم).',
-      discover: 'مربی‌ها بتوانند ما را با نام هم پیدا کنند', discoverHint: 'اگر خاموش باشد، فقط کسی که نام کاربری دقیق شما را بداند پیدایتان می‌کند. بعداً در تنظیمات هم قابل تغییر است.',
-      needConsent: 'برای ادامه، متن حریم خصوصی را قبول کنید.', needGuardian: 'حساب بازیکن زیر ۱۸ سال را باید پدر، مادر یا سرپرستش بسازد.',
+      guardian: 'من پدر، مادر یا سرپرست قانونی بازیکن هستم (یا خودم بازیکنم و ۱۶ سال یا بیشتر دارم).',
+      needConsent: 'برای ادامه، متن حریم خصوصی را قبول کنید.', needGuardian: 'حساب بازیکن زیر ۱۶ سال را باید پدر، مادر یا سرپرستش بسازد.',
       close: 'بستن', consentTitle: 'قبل از ادامه', consentText: 'از این نسخه، اپ قبل از هر کاری از شما اجازه می‌گیرد. لطفاً نحوهٔ استفاده از اطلاعاتتان را بخوانید و تأیید کنید.',
       accept: 'قبول و ادامه', blockedTitle: 'این حساب متوقف شده است',
       blockedText: 'آکادمی این حساب را موقتاً متوقف کرده است. اگر فکر می‌کنید اشتباهی شده، با مربی‌تان یا آکادمی تماس بگیرید.',
     }
   : {
-      title: '21GRAM Tennis', sub: 'Sign in for coaches and families', email: 'Email', pass: 'Password (8+ characters)',
-      signIn: 'Sign in', signUp: 'Create an account', forgot: 'Forgot password', show: 'Show password', hide: 'Hide password',
+      title: '21GRAM Tennis', sub: 'Training, matches and progress — for players, families and coaches', email: 'Email', pass: 'Password (8+ characters)',
+      signIn: 'Sign in', signUp: 'Create account', forgot: 'Forgot password', show: 'Show password', hide: 'Hide password',
       sent: 'Password reset email sent. Open the link in it to choose a new password.', newPass: 'New password (8+ characters)',
       newPassTitle: 'Choose a new password', save: 'Save password and continue', toggle: 'فارسی',
       checkEmail: 'Account created. We sent you a confirmation email — open its link to sign in.',
@@ -102,20 +107,25 @@ const T = fa
       exists: 'An account with this email already exists. Tap “Sign in”.', notConfirmed: 'Your email is not confirmed yet. Open the link in the confirmation email.',
       expired: 'This link has expired or was already used. Tap “Forgot password” again, or sign in.',
       tooMany: 'Too many attempts. Wait a few minutes and try again.', passwordSaved: 'Password saved.',
-      tabSignIn: 'Sign in', tabSignUp: 'Create account', whoAreYou: 'Who are you?', coach: 'Coach', parent: 'Family / player',
-      coachHint: 'After signing up, find your players by their username and send them a request.', parentHint: 'One account per player. After signing up, find your coach by their username and send a request.',
-      pickType: 'First choose: coach or family.',
+      tabSignIn: 'Sign in', tabSignUp: 'Create account', whoAreYou: 'Which account do you need?',
+      kind_player: 'Player', kind_player_text: 'I play tennis and follow my own training and matches.',
+      kind_family: 'Family', kind_family_text: 'I’m a parent making an account for my child.',
+      kind_coach: 'Coach', kind_coach_text: 'I coach: I plan for my players and chart their matches.',
+      form_player: 'Player account', form_family: 'Family account', form_coach: 'Coach account', change: 'Change',
+      firstName: 'First name', lastName: 'Last name', childFirst: 'Player’s first name (your child)', childLast: 'Player’s last name',
+      familyNameHint: 'Coaches find the player by this name. You add everything else later in the profile.',
+      laterHint: 'You add everything else later in your profile.',
+      legal_player: 'By creating the account you accept the {privacy} and confirm you are 16 or older (younger players join through a Family account).',
+      legal_family: 'By creating the account you accept the {privacy} and confirm you are this player’s parent or legal guardian.',
+      legal_coach: 'By creating the account you accept the {privacy}.',
+      privacyLink: 'privacy notice', pickType: 'First choose: player, family or coach.', needName: 'Write the first and last name.',
       pwHint: 'Password: at least 8 characters',
-      username: 'Username', usernameHint: 'Lowercase English letters, digits, . or _ — 3 to 24 characters. For example: yaman',
-      yourName: 'Your name', playerName: "Player's name", birthYear: "Player's birth year", badYear: 'That birth year does not look right.',
-      setupTitle: 'Create your username', setupText: 'Coaches and families find each other by username and connect.',
-      available: 'Available ✓', taken: 'This username is taken — choose another.', checking: 'Checking…',
+      setupTitle: 'Finish your account', setupText: 'Only the kind of account and the name are needed; you answer the rest later in your profile.',
       setupSave: 'Save and continue', setupFailed: 'Could not save. Check the internet and try again.', adminCoach: 'The admin account also works as a coach.',
       signOut: 'Sign out', deleted: 'Your account has been deleted.',
       agree: 'I have read and accept the privacy notice.', readNotice: 'Read it',
-      guardian: 'I am the player’s parent or legal guardian (or I am the player and 18 or older).',
-      discover: 'Coaches can also find us by name', discoverHint: 'When off, only someone who knows your exact username can find you. You can change this later in Settings.',
-      needConsent: 'Accept the privacy notice to continue.', needGuardian: 'A parent or guardian must make the account of a player under 18.',
+      guardian: 'I am the player’s parent or legal guardian (or I am the player and 16 or older).',
+      needConsent: 'Accept the privacy notice to continue.', needGuardian: 'A parent or guardian must make the account of a player under 16.',
       close: 'Close', consentTitle: 'Before you continue', consentText: 'From this version the app asks before anything is shared. Please read how your information is used and confirm.',
       accept: 'Accept and continue', blockedTitle: 'This account is paused',
       blockedText: 'The academy has paused this account for now. If you think this is a mistake, contact your coach or the academy.',
@@ -130,16 +140,88 @@ function friendly(raw: string): string {
   return raw;
 }
 
+const fieldCls = 'w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-ink';
+const primaryCls = 'h-12 rounded-full bg-accent text-[16px] font-semibold text-accent-ink disabled:opacity-40';
+const KINDS: { k: SignupKind; icon: string }[] = [
+  { k: 'player', icon: '🎾' },
+  { k: 'family', icon: '👨‍👩‍👧' },
+  { k: 'coach', icon: '📋' },
+];
+const cleanName = (v: string) => v.replace(/\s+/g, ' ').trim();
+const namesOk = (first: string, last: string) => cleanName(first).length >= 1 && cleanName(first).length <= 40 && cleanName(last).length >= 1 && cleanName(last).length <= 40;
+
+/** Step one of sign-up: player, family or coach (each gets its own words from here on). */
+function KindPicker({ value, onPick, testPrefix = 'kind' }: { value: SignupKind | null; onPick: (k: SignupKind) => void; testPrefix?: string }) {
+  return (
+    <fieldset className="flex flex-col gap-2.5">
+      <legend className="mb-2 font-display text-2xl">{T.whoAreYou}</legend>
+      {KINDS.map(({ k, icon }) => (
+        <button
+          key={k}
+          type="button"
+          aria-pressed={value === k}
+          data-testid={`${testPrefix}-${k}`}
+          onClick={() => onPick(k)}
+          className={`flex items-center gap-3.5 rounded-2xl border-2 p-4 text-start transition ${value === k ? 'border-accent bg-accent-soft' : 'border-line bg-surface hover:border-accent'}`}
+        >
+          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-sunken text-2xl" aria-hidden="true">
+            {icon}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[17px] font-semibold">{T[`kind_${k}`]}</span>
+            <span className="block text-[13.5px] leading-snug text-muted">{T[`kind_${k}_text`]}</span>
+          </span>
+          <span className="text-xl text-muted rtl:rotate-180" aria-hidden="true">›</span>
+        </button>
+      ))}
+    </fieldset>
+  );
+}
+
+/** "By creating the account you accept the privacy notice…" with the notice one tap away. */
+function LegalLine({ kind }: { kind: SignupKind }) {
+  const [reading, setReading] = useState(false);
+  const [before, after] = T[`legal_${kind}`].split('{privacy}');
+  return (
+    <p className="text-[13px] leading-relaxed text-muted" data-testid="legal-line">
+      {before}
+      <button type="button" className="font-semibold text-accent underline" onClick={() => setReading(true)} data-testid="open-privacy">
+        {T.privacyLink}
+      </button>
+      {after}
+      {reading && <PrivacyNoticeOverlay lang={fa ? 'fa' : 'en'} onClose={() => setReading(false)} closeLabel={T.close} />}
+    </p>
+  );
+}
+
+/** First and last name (for a family: the player's, since coaches find the player by it). */
+function NameFields({ kind, first, setFirst, last, setLast }: { kind: SignupKind; first: string; setFirst: (v: string) => void; last: string; setLast: (v: string) => void }) {
+  const family = kind === 'family';
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-2.5">
+        <label className="flex flex-col gap-1 text-sm font-semibold">
+          {family ? T.childFirst : T.firstName}
+          <input id="sb-first" className={`${fieldCls} font-normal`} value={first} maxLength={40} onChange={(e) => setFirst(e.target.value)} autoComplete={family ? 'off' : 'given-name'} dir="auto" />
+        </label>
+        <label className="flex flex-col gap-1 text-sm font-semibold">
+          {family ? T.childLast : T.lastName}
+          <input id="sb-last" className={`${fieldCls} font-normal`} value={last} maxLength={40} onChange={(e) => setLast(e.target.value)} autoComplete={family ? 'off' : 'family-name'} dir="auto" />
+        </label>
+      </div>
+      <p className="-mt-1 text-[12.5px] text-muted">{family ? T.familyNameHint : T.laterHint}</p>
+    </div>
+  );
+}
+
 type Screen = 'signin' | 'recovery' | 'welcome';
 
 function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: SupabaseAuth; onDone: () => void; screen?: Screen; notice?: string }) {
   const [screen] = useState<Screen>(initial);
   const [mode, setMode] = useState<'in' | 'up'>('in');
-  const [kind, setKind] = useState<'coach' | 'parent' | null>(null);
-  const [username, setUsername] = useState('');
-  const [name, setName] = useState('');
-  const [year, setYear] = useState('');
-  const [consent, setConsent] = useState<Consent>({ agree: false, guardian: false, discoverable: false });
+  const [kind, setKind] = useState<SignupKind | null>(null);
+  const [first, setFirst] = useState('');
+  const [last, setLast] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
@@ -158,15 +240,35 @@ function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: Su
       setBusy(false);
     }
   };
-  const cls = 'w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-ink';
-  const primary = 'h-11 rounded-full bg-accent font-semibold text-accent-ink disabled:opacity-40';
   const note = msg && (
     <p className={msg.bad ? 'text-sm font-semibold text-bad' : 'text-sm font-semibold text-good'} role="alert" data-testid="auth-message">
       {msg.text}
     </p>
   );
+  const emailField = (
+    <input className={fieldCls} type="email" autoComplete="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={T.email} value={email} onChange={(e) => setEmail(e.target.value)} id="sb-email" dir="ltr" />
+  );
+  const passwordField = (
+    <input
+      className={fieldCls}
+      type={show ? 'text' : 'password'}
+      autoComplete={mode === 'in' ? 'current-password' : 'new-password'}
+      autoCapitalize="none"
+      autoCorrect="off"
+      placeholder={T.pass}
+      value={password}
+      onChange={(e) => setPassword(e.target.value)}
+      id="sb-password"
+      dir="ltr"
+    />
+  );
+  const showBox = (
+    <label className="flex items-center gap-2 text-sm">
+      <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> {T.show}
+    </label>
+  );
   return (
-    <div className="gutter mx-auto flex min-h-[100dvh] max-w-sm flex-col justify-center gap-4" dir={fa ? 'rtl' : 'ltr'}>
+    <div className="gutter mx-auto flex min-h-[100dvh] max-w-sm flex-col justify-center gap-4 py-8" dir={fa ? 'rtl' : 'ltr'}>
       <div>
         <h1 className="font-display text-4xl">{T.title}</h1>
         <p className="text-sm text-muted">{T.sub}</p>
@@ -175,18 +277,18 @@ function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: Su
         <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-5" data-testid="welcome">
           <h2 className="font-display text-3xl">{T.welcomeTitle}</h2>
           <p>{T.welcomeText}</p>
-          <button type="button" className={primary} onClick={onDone}>{T.enter}</button>
+          <button type="button" className={primaryCls} onClick={onDone}>{T.enter}</button>
         </div>
       ) : screen === 'recovery' ? (
         <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); void run(() => auth.updatePassword(password), onDone); }}>
           <h2 className="font-display text-2xl">{T.newPassTitle}</h2>
-          <input className={cls} type={show ? 'text' : 'password'} autoComplete="new-password" placeholder={T.newPass} value={password} onChange={(e) => setPassword(e.target.value)} id="sb-newpass" dir="ltr" />
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> {T.show}</label>
+          <input className={fieldCls} type={show ? 'text' : 'password'} autoComplete="new-password" placeholder={T.newPass} value={password} onChange={(e) => setPassword(e.target.value)} id="sb-newpass" dir="ltr" />
+          {showBox}
           {note}
-          <button type="submit" disabled={busy || password.length < 8} className={primary} data-testid="save-new-password">{T.save}</button>
+          <button type="submit" disabled={busy || password.length < 8} className={primaryCls} data-testid="save-new-password">{T.save}</button>
         </form>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 rounded-full border border-line bg-surface p-1" role="tablist">
             {(['in', 'up'] as const).map((m) => (
               <button
@@ -202,84 +304,62 @@ function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: Su
               </button>
             ))}
           </div>
-          {mode === 'up' && (
-            <fieldset className="flex flex-col gap-2">
-              <legend className="mb-1 text-sm font-semibold">{T.whoAreYou}</legend>
-              <div className="grid grid-cols-2 gap-2">
-                {(['coach', 'parent'] as const).map((k) => (
-                  <button
-                    key={k}
-                    type="button"
-                    aria-pressed={kind === k}
-                    data-testid={`kind-${k}`}
-                    onClick={() => setKind(k)}
-                    className={kind === k ? 'rounded-2xl border-2 border-accent bg-accent-soft p-3 text-start' : 'rounded-2xl border-2 border-line bg-surface p-3 text-start'}
-                  >
-                    <span className="block text-2xl" aria-hidden="true">{k === 'coach' ? '🎾' : '👨‍👩‍👧'}</span>
-                    <span className="block font-semibold">{k === 'coach' ? T.coach : T.parent}</span>
-                  </button>
-                ))}
-              </div>
-              {kind && <p className="text-[13px] text-muted">{kind === 'coach' ? T.coachHint : T.parentHint}</p>}
-            </fieldset>
-          )}
-          {mode === 'up' && kind && <ProfileFields kind={kind === 'coach' ? 'coach' : 'family'} username={username} setUsername={setUsername} name={name} setName={setName} year={year} setYear={setYear} />}
-          <form
-            className="flex flex-col gap-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (mode === 'in') void run(() => auth.signIn(email.trim(), password), onDone);
-              else if (!kind) setMsg({ text: T.pickType, bad: true });
-              else if (!profileOk(kind === 'coach' ? 'coach' : 'family', username, name, year)) setMsg({ text: T.usernameHint, bad: true });
-              else if (!consent.agree) setMsg({ text: T.needConsent, bad: true });
-              else if (kind === 'parent' && !consent.guardian) setMsg({ text: T.needGuardian, bad: true });
-              else
-                void run(async () => {
-                  const family = kind === 'parent';
-                  const profile = {
-                    username,
-                    displayName: name.trim(),
-                    birthYear: family && year ? Number(year) : null,
-                    consent: CONSENT_VERSION,
-                    guardian: family && consent.guardian,
-                    discoverable: family && consent.discoverable,
-                  };
-                  try {
-                    await auth.signUp(email.trim(), password, kind, profile);
-                  } catch (e) {
-                    // Accounts are confirmed automatically on the server; sign straight in.
-                    if (/confirm/i.test(e instanceof Error ? e.message : String(e))) await auth.signIn(email.trim(), password);
-                    else throw e;
-                  }
-                }, onDone);
-            }}
-          >
-            <input className={cls} type="email" autoComplete="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder={T.email} value={email} onChange={(e) => setEmail(e.target.value)} id="sb-email" dir="ltr" />
-            <input className={cls} type={show ? 'text' : 'password'} autoComplete={mode === 'in' ? 'current-password' : 'new-password'} autoCapitalize="none" autoCorrect="off" placeholder={T.pass} value={password} onChange={(e) => setPassword(e.target.value)} id="sb-password" dir="ltr" />
-            {mode === 'up' && <p className={`-mt-1 text-[13px] ${password && password.length < 8 ? 'font-semibold text-bad' : 'text-muted'}`} data-testid="pw-hint">{T.pwHint}{password ? ` (${password.length}/8)` : ''}</p>}
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> {T.show}</label>
-            {mode === 'up' && kind && <ConsentFields kind={kind === 'coach' ? 'coach' : 'family'} c={consent} set={setConsent} />}
-            {note}
-            {mode === 'in' ? (
-              <button type="submit" disabled={busy || !email || !password} className={primary} data-testid="sign-in">{T.signIn}</button>
-            ) : (
-              <button
-                type="submit"
-                disabled={
-                  busy || !email || password.length < 8 || !kind || !profileOk(kind === 'coach' ? 'coach' : 'family', username, name, year) || !consentOk(kind === 'coach' ? 'coach' : 'family', consent)
-                }
-                className={primary}
-                data-testid="sign-up"
-              >
-                {T.signUp}
-              </button>
-            )}
-            {mode === 'in' && (
+          {mode === 'in' ? (
+            <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); void run(() => auth.signIn(email.trim(), password), onDone); }}>
+              {emailField}
+              {passwordField}
+              {showBox}
+              {note}
+              <button type="submit" disabled={busy || !email || !password} className={primaryCls} data-testid="sign-in">{T.signIn}</button>
               <button type="button" disabled={busy || !email} className="text-sm font-semibold text-accent disabled:opacity-40" data-testid="forgot" onClick={() => void run(() => auth.resetPassword(email.trim()), () => setMsg({ text: T.sent, bad: false }))}>
                 {T.forgot}
               </button>
-            )}
-          </form>
+            </form>
+          ) : !kind ? (
+            <KindPicker value={kind} onPick={(k) => { setKind(k); setMsg(null); }} />
+          ) : (
+            <form
+              className="flex flex-col gap-3"
+              data-testid={`signup-${kind}`}
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!namesOk(first, last)) return setMsg({ text: T.needName, bad: true });
+                void run(async () => {
+                  const profile = { firstName: cleanName(first), lastName: cleanName(last), kind, consent: CONSENT_VERSION };
+                  try {
+                    await auth.signUp(email.trim(), password, kind === 'coach' ? 'coach' : 'parent', profile);
+                  } catch (err) {
+                    // Accounts are confirmed automatically on the server; sign straight in.
+                    if (/confirm/i.test(err instanceof Error ? err.message : String(err))) await auth.signIn(email.trim(), password);
+                    else throw err;
+                  }
+                }, onDone);
+              }}
+            >
+              <div className="flex items-center justify-between gap-3 rounded-2xl bg-sunken px-3.5 py-2.5">
+                <span className="flex items-center gap-2 font-semibold">
+                  <span aria-hidden="true">{KINDS.find((x) => x.k === kind)?.icon}</span>
+                  {T[`form_${kind}`]}
+                </span>
+                <button type="button" className="text-sm font-semibold text-accent" onClick={() => { setKind(null); setMsg(null); }} data-testid="change-kind">
+                  {T.change}
+                </button>
+              </div>
+              <NameFields kind={kind} first={first} setFirst={setFirst} last={last} setLast={setLast} />
+              {emailField}
+              {passwordField}
+              <p className={`-mt-1 text-[13px] ${password && password.length < 8 ? 'font-semibold text-bad' : 'text-muted'}`} data-testid="pw-hint">
+                {T.pwHint}
+                {password ? ` (${password.length}/8)` : ''}
+              </p>
+              {showBox}
+              <LegalLine kind={kind} />
+              {note}
+              <button type="submit" disabled={busy || !email || password.length < 8 || !namesOk(first, last)} className={primaryCls} data-testid="sign-up">
+                {busy ? '…' : T.signUp}
+              </button>
+            </form>
+          )}
         </div>
       )}
       <button
@@ -301,19 +381,11 @@ function SignIn({ auth, onDone, screen: initial = 'signin', notice }: { auth: Su
   );
 }
 
-const thisYear = new Date().getFullYear();
-const yearOk = (y: string) => !y || (/^\d{4}$/.test(y) && Number(y) >= thisYear - 90 && Number(y) <= thisYear - 3);
-function profileOk(kind: 'coach' | 'family', username: string, name: string, year: string) {
-  return USERNAME_RE.test(username) && name.trim().length >= 2 && name.trim().length <= 60 && (kind === 'coach' || yearOk(year));
-}
-
-const fieldCls = 'w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-ink';
-
-type Consent = { agree: boolean; guardian: boolean; discoverable: boolean };
+type Consent = { agree: boolean; guardian: boolean };
 const consentOk = (kind: 'coach' | 'family', c: Consent) => c.agree && (kind === 'coach' || c.guardian);
 
-/** Asked before an account is made: the privacy notice, and for a family the guardian and being found by name. */
-function ConsentFields({ kind, c, set, discover = true }: { kind: 'coach' | 'family'; c: Consent; set: (c: Consent) => void; discover?: boolean }) {
+/** Accounts from before consent was asked: the privacy notice and, for a parent, the guardian line. */
+function ConsentFields({ kind, c, set }: { kind: 'coach' | 'family'; c: Consent; set: (c: Consent) => void }) {
   const [reading, setReading] = useState(false);
   const row = 'flex items-start gap-2.5 text-[14px] leading-snug';
   const box = 'mt-0.5 h-[18px] w-[18px] shrink-0 accent-accent';
@@ -334,185 +406,85 @@ function ConsentFields({ kind, c, set, discover = true }: { kind: 'coach' | 'fam
           <span>{T.guardian}</span>
         </label>
       )}
-      {kind === 'family' && discover && (
-        <label className={row}>
-          <input type="checkbox" className={box} checked={c.discoverable} onChange={(e) => set({ ...c, discoverable: e.target.checked })} data-testid="consent-discoverable" />
-          <span>
-            <span className="font-semibold">{T.discover}</span>
-            <span className="mt-0.5 block text-[12.5px] text-muted">{T.discoverHint}</span>
-          </span>
-        </label>
-      )}
       {reading && <PrivacyNoticeOverlay lang={fa ? 'fa' : 'en'} onClose={() => setReading(false)} closeLabel={T.close} />}
     </fieldset>
   );
 }
 
-/** Username, name and (for a family) the player's birth year: at sign-up and on the profile screen. */
-function ProfileFields({
-  kind, username, setUsername, name, setName, year, setYear, status,
-}: {
-  kind: 'coach' | 'family'; username: string; setUsername: (v: string) => void; name: string; setName: (v: string) => void;
-  year: string; setYear: (v: string) => void; status?: 'checking' | 'available' | 'taken' | null;
-}) {
-  const badName = username.length > 0 && !USERNAME_RE.test(username);
-  return (
-    <div className="flex flex-col gap-3">
-      <label className="flex flex-col gap-1 text-sm font-semibold">
-        {T.username}
-        <span className="flex items-center rounded-xl border border-line bg-surface ps-3 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent" dir="ltr">
-          <span className="text-muted">@</span>
-          <input
-            id="sb-username"
-            className="min-w-0 flex-1 bg-transparent px-1 py-2.5 font-normal text-ink"
-            style={{ outline: 'none' }}
-            value={username}
-            onChange={(e) => setUsername(cleanUsername(e.target.value))}
-            autoCapitalize="none"
-            autoCorrect="off"
-            autoComplete="username"
-            spellCheck={false}
-            placeholder="yaman"
-          />
-        </span>
-        <span className={`text-[13px] font-normal ${badName || status === 'taken' ? 'font-semibold text-bad' : status === 'available' ? 'font-semibold text-good' : 'text-muted'}`} data-testid="username-hint">
-          {status === 'taken' ? T.taken : status === 'available' ? T.available : status === 'checking' ? T.checking : T.usernameHint}
-        </span>
-      </label>
-      <label className="flex flex-col gap-1 text-sm font-semibold">
-        {kind === 'coach' ? T.yourName : T.playerName}
-        <input id="sb-name" className={`${fieldCls} font-normal`} value={name} maxLength={60} onChange={(e) => setName(e.target.value)} autoComplete="name" dir="auto" />
-      </label>
-      {kind === 'family' && (
-        <label className="flex flex-col gap-1 text-sm font-semibold">
-          {T.birthYear}
-          <input
-            id="sb-birthyear"
-            className={`${fieldCls} font-normal`}
-            inputMode="numeric"
-            value={year}
-            onChange={(e) => setYear(asciiDigits(e.target.value).replace(/\D/g, '').slice(0, 4))}
-            placeholder={String(thisYear - 12)}
-            dir="ltr"
-          />
-          {year.length === 4 && !yearOk(year) && <span className="text-[13px] font-semibold text-bad">{T.badYear}</span>}
-        </label>
-      )}
-    </div>
-  );
-}
-
 type RegisterResult = { ok?: boolean; error?: string } | null;
+type Registration = { kind: SignupKind; firstName: string; lastName: string; consent: string };
 
-/** First sign-in without a profile (or the username was taken at sign-up): choose it here. */
-type Registration = { kind: 'coach' | 'family'; username: string; displayName: string; birthYear: number | null; consent: string; guardian: boolean; discoverable: boolean };
-
+/** Signed in without a profile (the admin's first sign-in, or an older sign-in): kind and name only. */
 function ProfileSetup({
-  initial, fixedKind, error, register, available, onDone, onSignOut,
+  initial, fixedKind, error, register, onDone, onSignOut,
 }: {
-  initial: { kind: 'coach' | 'family' | null; username: string; displayName: string; birthYear: number | null; consent?: string; guardian?: boolean; discoverable?: boolean };
+  initial: { kind: SignupKind | null; firstName: string; lastName: string };
   fixedKind: 'coach' | null;
   error: string;
   register: (p: Registration) => Promise<RegisterResult>;
-  available: (u: string) => Promise<boolean>;
   onDone: () => void;
   onSignOut: () => void;
 }) {
-  const [kind, setKind] = useState<'coach' | 'family' | null>(fixedKind ?? initial.kind);
-  const [username, setUsername] = useState(cleanUsername(initial.username));
-  const [name, setName] = useState(initial.displayName);
-  const [year, setYear] = useState(initial.birthYear ? String(initial.birthYear) : '');
-  const [consent, setConsent] = useState<Consent>({ agree: !!initial.consent, guardian: !!initial.guardian, discoverable: !!initial.discoverable });
-  const [status, setStatus] = useState<'checking' | 'available' | 'taken' | null>(error === 'username_taken' ? 'taken' : null);
-  const [msg, setMsg] = useState(error && !['username_taken', 'consent_required', 'guardian_required'].includes(error) ? T.setupFailed : '');
+  const [kind, setKind] = useState<SignupKind | null>(fixedKind ?? initial.kind);
+  const [first, setFirst] = useState(initial.firstName);
+  const [last, setLast] = useState(initial.lastName);
+  const [msg, setMsg] = useState(error ? T.setupFailed : '');
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (!USERNAME_RE.test(username)) return setStatus(null);
-    setStatus('checking');
-    let live = true;
-    const timer = setTimeout(() => {
-      available(username)
-        .then((ok) => live && setStatus(ok ? 'available' : 'taken'))
-        .catch(() => live && setStatus(null));
-    }, 350);
-    return () => {
-      live = false;
-      clearTimeout(timer);
-    };
-  }, [username, available]);
-  const ok = !!kind && profileOk(kind, username, name, year) && status !== 'taken' && consentOk(kind, consent);
+  const ok = !!kind && namesOk(first, last);
   return (
-    <div className="gutter mx-auto flex min-h-[100dvh] max-w-sm flex-col justify-center gap-4" dir={fa ? 'rtl' : 'ltr'} data-testid="profile-setup">
+    <div className="gutter mx-auto flex min-h-[100dvh] max-w-sm flex-col justify-center gap-4 py-8" dir={fa ? 'rtl' : 'ltr'} data-testid="profile-setup">
       <h1 className="font-display text-4xl">{T.title}</h1>
-      <form
-        className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-5"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          if (!ok || !kind) return;
-          setBusy(true);
-          setMsg('');
-          try {
-            const family = kind === 'family';
-            const r = await register({
-              kind,
-              username,
-              displayName: name.trim(),
-              birthYear: family && year ? Number(year) : null,
-              consent: CONSENT_VERSION,
-              guardian: family && consent.guardian,
-              discoverable: family && consent.discoverable,
-            });
-            if (r?.ok || r?.error === 'exists') return onDone();
-            if (r?.error === 'username_taken') setStatus('taken');
-            else if (r?.error === 'consent_required') setMsg(T.needConsent);
-            else if (r?.error === 'guardian_required') setMsg(T.needGuardian);
-            else setMsg(T.setupFailed);
-          } catch {
-            setMsg(T.setupFailed);
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        <h2 className="font-display text-2xl">{T.setupTitle}</h2>
-        <p className="text-sm text-muted">{T.setupText}</p>
-        {fixedKind ? (
-          <p className="rounded-xl bg-accent-soft px-3 py-2 text-[13px] font-semibold">🎾 {T.coach} — {T.adminCoach}</p>
-        ) : (
-          <fieldset className="grid grid-cols-2 gap-2">
-            <legend className="mb-1 text-sm font-semibold">{T.whoAreYou}</legend>
-            {(['coach', 'family'] as const).map((k) => (
-              <button
-                key={k}
-                type="button"
-                aria-pressed={kind === k}
-                data-testid={`setup-kind-${k}`}
-                onClick={() => setKind(k)}
-                className={kind === k ? 'rounded-2xl border-2 border-accent bg-accent-soft p-3 text-start' : 'rounded-2xl border-2 border-line bg-surface p-3 text-start'}
-              >
-                <span className="block text-2xl" aria-hidden="true">{k === 'coach' ? '🎾' : '👨‍👩‍👧'}</span>
-                <span className="block font-semibold">{k === 'coach' ? T.coach : T.parent}</span>
+      {!kind ? (
+        <KindPicker value={kind} onPick={setKind} testPrefix="setup-kind" />
+      ) : (
+        <form
+          className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-5"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!ok || !kind) return setMsg(T.needName);
+            setBusy(true);
+            setMsg('');
+            try {
+              const r = await register({ kind, firstName: cleanName(first), lastName: cleanName(last), consent: CONSENT_VERSION });
+              if (r?.ok || r?.error === 'exists') return onDone();
+              setMsg(r?.error === 'bad_name' ? T.needName : T.setupFailed);
+            } catch {
+              setMsg(T.setupFailed);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <h2 className="font-display text-2xl">{T.setupTitle}</h2>
+          <p className="text-sm text-muted">{T.setupText}</p>
+          {fixedKind ? (
+            <p className="rounded-xl bg-accent-soft px-3 py-2 text-[13px] font-semibold">📋 {T.kind_coach} — {T.adminCoach}</p>
+          ) : (
+            <div className="flex items-center justify-between gap-3 rounded-2xl bg-sunken px-3.5 py-2.5">
+              <span className="font-semibold">{T[`form_${kind}`]}</span>
+              <button type="button" className="text-sm font-semibold text-accent" onClick={() => setKind(null)} data-testid="change-kind">
+                {T.change}
               </button>
-            ))}
-          </fieldset>
-        )}
-        {kind && <ProfileFields kind={kind} username={username} setUsername={setUsername} name={name} setName={setName} year={year} setYear={setYear} status={status} />}
-        {kind && <ConsentFields kind={kind} c={consent} set={setConsent} />}
-        {msg && <p className="text-sm font-semibold text-bad" role="alert">{msg}</p>}
-        <button type="submit" disabled={busy || !ok} className="h-11 rounded-full bg-accent font-semibold text-accent-ink disabled:opacity-40" data-testid="setup-save">
-          {busy ? '…' : T.setupSave}
-        </button>
-        <button type="button" className="text-sm font-semibold text-muted underline" onClick={onSignOut}>
-          {T.signOut}
-        </button>
-      </form>
+            </div>
+          )}
+          <NameFields kind={kind} first={first} setFirst={setFirst} last={last} setLast={setLast} />
+          <LegalLine kind={kind} />
+          {msg && <p className="text-sm font-semibold text-bad" role="alert">{msg}</p>}
+          <button type="submit" disabled={busy || !ok} className={primaryCls} data-testid="setup-save">
+            {busy ? '…' : T.setupSave}
+          </button>
+          <button type="button" className="text-sm font-semibold text-muted underline" onClick={onSignOut}>
+            {T.signOut}
+          </button>
+        </form>
+      )}
     </div>
   );
 }
 
 /** Accounts made before consent was asked: accept once, then continue. */
 function ConsentGate({ kind, give, onDone, onSignOut }: { kind: 'coach' | 'family'; give: (guardian: boolean) => Promise<Result>; onDone: () => void; onSignOut: () => void }) {
-  const [c, setC] = useState<Consent>({ agree: false, guardian: false, discoverable: false });
+  const [c, setC] = useState<Consent>({ agree: false, guardian: false });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   return (
@@ -538,7 +510,7 @@ function ConsentGate({ kind, give, onDone, onSignOut }: { kind: 'coach' | 'famil
       >
         <h2 className="font-display text-2xl">{T.consentTitle}</h2>
         <p className="text-sm text-muted">{T.consentText}</p>
-        <ConsentFields kind={kind} c={c} set={setC} discover={false} />
+        <ConsentFields kind={kind} c={c} set={setC} />
         {msg && <p className="text-sm font-semibold text-bad" role="alert">{msg}</p>}
         <button type="submit" disabled={busy || !consentOk(kind, c)} className="h-11 rounded-full bg-accent font-semibold text-accent-ink disabled:opacity-40" data-testid="consent-accept">
           {busy ? '…' : T.accept}
@@ -567,15 +539,19 @@ function Blocked({ onSignOut }: { onSignOut: () => void }) {
   );
 }
 
-interface RawHit { username: string; display_name: string; kind: 'coach' | 'family'; verified: boolean; status: SearchHit['status']; direction: SearchHit['direction'] }
+interface RawHit {
+  username: string; display_name: string; kind: 'coach' | 'family'; holder: Holder | null; verified: boolean; club: string | null; city: string | null;
+  status: SearchHit['status']; direction: SearchHit['direction'];
+}
 interface RawConn {
-  username: string; display_name: string; kind: 'coach' | 'family'; verified: boolean; status: Connection['status']; direction: Connection['direction']; player_id: string; since: string;
+  username: string; display_name: string; kind: 'coach' | 'family'; holder: Holder | null; verified: boolean; club: string | null; city: string | null;
+  status: Connection['status']; direction: Connection['direction']; player_id: string; since: string;
 }
 interface RawLink {
   id: string; offline_id: string; offline_name: string; coach_username: string; coach_name: string; family_username: string; family_name: string; direction: 'in' | 'out'; created_at: string;
 }
 interface RawMember {
-  user_id: string; username: string; display_name: string; kind: 'coach' | 'family'; email: string; created_at: string; connections: number;
+  user_id: string; username: string; display_name: string; kind: 'coach' | 'family'; holder: Holder | null; email: string; created_at: string; connections: number;
   blocked: boolean; verified: boolean; guardian: boolean; consent_at: string | null; staff: boolean;
 }
 
@@ -601,33 +577,19 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth, restart: (
     auth.signOut();
     window.location.reload();
   };
+  // A new account goes to its profile first (the questions sign-up no longer asks).
+  let fresh = false;
   if (!user.profile) {
-    // Everyone has a username (supabase/social.sql). The admin's account works as a coach.
+    // Everyone has a profile (supabase/social-3.sql). The admin's account works as a coach.
     const fixedKind = user.role ? 'coach' : null;
     const typed = auth.signupProfile();
     const register = (x: Registration) =>
-      db.rpc<RegisterResult>('register_profile_v2', {
-        p_username: x.username,
-        p_display_name: x.displayName,
-        p_kind: x.kind,
-        p_birth_year: x.birthYear,
-        p_discoverable: x.discoverable,
-        p_guardian: x.guardian,
-        p_consent: x.consent,
-      });
+      db.rpc<RegisterResult>('register_profile_v3', { p_first: x.firstName, p_last: x.lastName, p_kind: x.kind, p_consent: x.consent });
     let error = '';
     const kind = fixedKind ?? typed.kind;
-    if (kind && USERNAME_RE.test(typed.username) && typed.displayName.trim() && typed.consent) {
+    if (kind && typed.firstName.trim() && typed.lastName.trim() && typed.consent) {
       // Typed and accepted at sign-up: save it now.
-      const r = await register({
-        kind,
-        username: typed.username,
-        displayName: typed.displayName,
-        birthYear: kind === 'family' ? typed.birthYear ?? null : null,
-        consent: typed.consent,
-        guardian: kind === 'family' && !!typed.guardian,
-        discoverable: kind === 'family' && !!typed.discoverable,
-      }).catch((): RegisterResult => ({ error: 'failed' }));
+      const r = await register({ kind, firstName: typed.firstName, lastName: typed.lastName, consent: typed.consent }).catch((): RegisterResult => ({ error: 'failed' }));
       if (r?.ok || r?.error === 'exists') user = await supabaseUser(db, auth);
       else error = r?.error ?? 'failed';
     }
@@ -635,17 +597,20 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth, restart: (
       db.stop();
       root.render(
         <ProfileSetup
-          initial={{ ...typed, kind: fixedKind ?? typed.kind, birthYear: typed.birthYear ?? null }}
+          initial={{ kind: fixedKind ?? typed.kind, firstName: typed.firstName, lastName: typed.lastName }}
           fixedKind={fixedKind}
           error={error}
           register={register}
-          available={(u) => db.rpc<boolean>('username_available', { p_username: u })}
-          onDone={restart}
+          onDone={() => {
+            window.location.hash = 'profile-welcome';
+            restart();
+          }}
           onSignOut={() => void signOut()}
         />,
       );
       return;
     }
+    fresh = true;
   }
   const profile: MyProfile = user.profile!;
   if (profile.blocked) {
@@ -679,16 +644,29 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth, restart: (
     me: profile,
     myId,
     async search(q) {
-      const rows = (await db.rpc<RawHit[]>('search_people', { p_query: q })) ?? [];
-      return rows.map((h) => ({ username: h.username, displayName: h.display_name, kind: h.kind, verified: !!h.verified, status: h.status ?? null, direction: h.direction ?? null }));
+      const rows = (await db.rpc<RawHit[]>('search_people_v2', { p_query: q })) ?? [];
+      return rows.map((h) => ({
+        username: h.username,
+        displayName: h.display_name,
+        kind: h.kind,
+        holder: h.holder,
+        verified: !!h.verified,
+        club: h.club,
+        city: h.city,
+        status: h.status ?? null,
+        direction: h.direction ?? null,
+      }));
     },
     async connections() {
-      const rows = (await db.rpc<RawConn[]>('my_connections_v2')) ?? [];
+      const rows = (await db.rpc<RawConn[]>('my_connections_v3')) ?? [];
       return rows.map((c) => ({
         username: c.username,
         displayName: c.display_name,
         kind: c.kind,
+        holder: c.holder,
         verified: !!c.verified,
+        club: c.club,
+        city: c.city,
         status: c.status,
         direction: c.direction,
         playerId: c.player_id,
@@ -719,25 +697,32 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth, restart: (
     respondLink: (id, accept) => rpc('respond_link', { p_id: id, p_accept: accept }),
     merge: (id, u) => rpc('merge_offline_player', { p_offline: id, p_username: u }),
     async updateProfile(p) {
-      const r = await rpc('update_my_profile', { p_display_name: p.displayName ?? null, p_discoverable: p.discoverable ?? null, p_notify_live: p.notifyLive ?? null });
+      const r = await rpc('update_my_profile_v2', {
+        p_first: p.firstName ?? null,
+        p_last: p.lastName ?? null,
+        p_details: p.details ?? null,
+        p_discoverable: p.discoverable ?? null,
+        p_notify_live: p.notifyLive ?? null,
+      });
       if (r?.ok) {
-        if (p.displayName !== undefined) social.me.displayName = p.displayName.trim();
-        if (p.discoverable !== undefined && social.me.kind === 'family') social.me.discoverable = p.discoverable;
-        if (p.notifyLive !== undefined) social.me.notifyLive = p.notifyLive;
+        // The database's copy is the truth (it tidies names and answers).
+        const fresh = await db.rpc<Partial<MyProfile> | null>('my_profile').catch(() => null);
+        if (fresh?.username) {
+          Object.assign(social.me, {
+            displayName: fresh.displayName ?? social.me.displayName,
+            firstName: fresh.firstName ?? social.me.firstName,
+            lastName: fresh.lastName ?? social.me.lastName,
+            details: (fresh.details as ProfileDetails) ?? social.me.details,
+            discoverable: fresh.discoverable ?? social.me.discoverable,
+            notifyLive: fresh.notifyLive ?? social.me.notifyLive,
+          });
+        }
         adapter.myName = social.me.displayName;
+        if (p.firstName !== undefined || p.lastName !== undefined) void db.poll();
         profileChanged();
       }
       return r;
     },
-    async changeUsername(u) {
-      const r = await rpc('change_username', { p_username: u });
-      if (r?.ok && r.username) {
-        social.me.username = r.username;
-        profileChanged();
-      }
-      return r;
-    },
-    usernameAvailable: (u) => db.rpc<boolean>('username_available', { p_username: u }),
     async updatePlayer(patch) {
       const r = await rpc('family_update_player', { p_patch: patch });
       if (r?.ok) {
@@ -762,13 +747,14 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth, restart: (
     savePush: (x) => rpc('save_push_subscription', { p_endpoint: x.endpoint, p_p256dh: x.p256dh, p_auth: x.auth, p_lang: x.lang, p_user_agent: navigator.userAgent.slice(0, 300) }),
     disablePush: (endpoint) => rpc('disable_push_subscription', { p_endpoint: endpoint }),
     async members() {
-      const rows = (await db.rpc<RawMember[]>('admin_profiles_v2')) ?? [];
+      const rows = (await db.rpc<RawMember[]>('admin_profiles_v3')) ?? [];
       return rows.map(
         (m): Member => ({
           userId: m.user_id,
           username: m.username,
           displayName: m.display_name,
           kind: m.kind,
+          holder: m.holder,
           email: m.email,
           createdAt: m.created_at,
           connections: m.connections,
@@ -893,6 +879,7 @@ async function startSupabase(cfg: SupabaseConfig, auth: SupabaseAuth, restart: (
   };
   const state = await adapter.load();
   void syncPush(social.savePush, state.settings.lang);
+  if (fresh) window.location.hash = 'profile-welcome';
   render(state, adapter);
 }
 

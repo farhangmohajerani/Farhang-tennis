@@ -149,6 +149,10 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
     user_id: u.id,
     username: name,
     display_name: display,
+    first_name: display.split(' ')[0] ?? display,
+    last_name: display.split(' ').slice(1).join(' ') || null,
+    holder: kind === 'family' ? 'parent' : null,
+    details: {},
     kind,
     created_at: stamp(),
     discoverable: kind === 'coach',
@@ -220,6 +224,10 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
             username: p.username,
             displayName: p.display_name,
             kind: p.kind,
+            firstName: p.first_name ?? p.display_name,
+            lastName: p.last_name ?? '',
+            holder: p.holder ?? null,
+            details: p.details ?? {},
             discoverable: p.discoverable,
             notifyLive: p.notify_live,
             verified: p.verified,
@@ -237,7 +245,103 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
       // Replaced by register_profile_v2 (no longer callable by signed-in people in production).
       return { status: 403, body: { code: '42501', message: 'permission denied for function register_profile' } };
     },
+    register_profile_v3(u, a) {
+      const tidy = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+      const first = tidy(a.p_first);
+      const last = tidy(a.p_last);
+      if (profiles.has(u.id)) return { error: 'exists' };
+      if (first.length < 1 || first.length > 40 || last.length < 1 || last.length > 40) return { error: 'bad_name' };
+      if (!['coach', 'family', 'player'].includes(a.p_kind)) return { error: 'bad_kind' };
+      const consent = String(a.p_consent ?? '').trim();
+      if (consent.length < 1 || consent.length > 40) return { error: 'consent_required' };
+      const kind = a.p_kind === 'coach' ? 'coach' : 'family';
+      let name;
+      do name = 'u' + crypto.randomBytes(6).toString('hex').slice(0, 11);
+      while (byUsername(name));
+      profiles.set(
+        u.id,
+        newProfile(u, name, `${first} ${last}`, kind, {
+          first_name: first,
+          last_name: last,
+          holder: a.p_kind === 'family' ? 'parent' : a.p_kind === 'player' ? 'player' : null,
+          discoverable: true,
+          guardian: a.p_kind === 'family',
+          consent_version: consent,
+          consent_at: stamp(),
+        }),
+      );
+      if (kind === 'family' && !docs.has(`academy/data/players/${u.id}`)) {
+        // Nothing is assumed: birth year, level, hand and backhand wait for the profile.
+        putDoc(`academy/data/players/${u.id}`, {
+          id: u.id, name: `${first} ${last}`, birthYear: null, level: null, hand: null, backhand: null,
+          coachId: '', parentId: '', parentIds: [], goals: '', accountId: u.id, username: name, aiConsent: false,
+        });
+      }
+      return { ok: true };
+    },
+    update_my_profile_v2(u, a) {
+      const p = profiles.get(u.id);
+      if (!p) return { error: 'no_profile' };
+      const tidy = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+      const first = tidy(a.p_first);
+      const last = tidy(a.p_last);
+      if ((a.p_first != null && (first.length < 1 || first.length > 40)) || (a.p_last != null && (last.length < 1 || last.length > 40))) return { error: 'bad_name' };
+      if (a.p_first != null) p.first_name = first;
+      if (a.p_last != null) p.last_name = last;
+      if (a.p_first != null || a.p_last != null) {
+        p.display_name = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim();
+        const own = docs.get(`academy/data/players/${u.id}`);
+        if (p.kind === 'family' && own) putDoc(own.path, { ...own.data, name: p.display_name });
+      }
+      if (a.p_details && typeof a.p_details === 'object') {
+        const allowed = p.kind === 'coach' ? ['club', 'city', 'yearsCoaching', 'certifications', 'bio'] : p.holder === 'parent' ? ['parentName', 'city'] : ['city'];
+        const limits = { club: 80, city: 60, certifications: 120, bio: 300, parentName: 80 };
+        const d = { ...(p.details ?? {}) };
+        for (const [k, v] of Object.entries(a.p_details)) {
+          if (!allowed.includes(k)) continue;
+          const val = String(v ?? '').trim();
+          if (!val) delete d[k];
+          else if (k === 'yearsCoaching') {
+            if (['0-2', '3-5', '6-10', '10+'].includes(val)) d[k] = val;
+          } else d[k] = val.slice(0, limits[k]);
+        }
+        p.details = d;
+      }
+      p.discoverable = p.kind === 'coach' ? true : a.p_discoverable == null ? p.discoverable : !!a.p_discoverable;
+      if (a.p_notify_live != null) p.notify_live = !!a.p_notify_live;
+      return { ok: true };
+    },
+    search_people_v2(u, a) {
+      const kind = myKind(u);
+      const norm = (v) => String(v ?? '').toLowerCase().replace(/ي/g, 'ی').replace(/ك/g, 'ک').replace(/\u200c/g, '').replace(/\s+/g, ' ').trim();
+      const q = norm(a.p_query).replace(/[^\p{L}\p{N}_. '-]/gu, '').trim();
+      if (!kind || q.length < 2 || blocked(u)) return [];
+      return [...profiles.values()]
+        .filter((p) => p.kind !== kind && p.user_id !== u.id && !p.blocked && (p.kind === 'coach' || p.discoverable))
+        .filter((p) => [p.first_name, p.last_name, p.display_name].some((x) => norm(x).startsWith(q)) || norm(p.display_name).includes(' ' + q))
+        .sort((x, y) => Number(y.verified) - Number(x.verified) || norm(x.display_name).localeCompare(norm(y.display_name)))
+        .slice(0, 20)
+        .map((p) => {
+          const c = connections.get(kind === 'coach' ? `${u.id}|${p.user_id}` : `${p.user_id}|${u.id}`);
+          const live = c && ['pending', 'accepted'].includes(c.status);
+          return {
+            username: p.username,
+            display_name: p.display_name,
+            kind: p.kind,
+            holder: p.holder ?? null,
+            verified: p.verified,
+            club: p.kind === 'coach' ? p.details?.club ?? null : null,
+            city: p.kind === 'coach' ? p.details?.city ?? null : null,
+            status: live ? c.status : null,
+            direction: live ? (c.requested_by === kind ? 'out' : 'in') : null,
+          };
+        });
+    },
     register_profile_v2(u, a) {
+      // Replaced by register_profile_v3 (names only, nothing assumed about the player).
+      return { status: 403, body: { code: '42501', message: 'permission denied for function register_profile_v2' } };
+    },
+    register_profile_v2_old(u, a) {
       const name = String(a.p_username ?? '').trim().toLowerCase();
       const display = String(a.p_display_name ?? '').trim();
       if (profiles.has(u.id)) return { error: 'exists' };
@@ -265,8 +369,9 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
       if (!p) return { error: 'no_profile' };
       const consent = String(a.p_consent ?? '').trim();
       if (consent.length < 1 || consent.length > 40) return { error: 'consent_required' };
-      if (p.kind === 'family' && a.p_guardian !== true) return { error: 'guardian_required' };
-      Object.assign(p, { consent_version: consent, consent_at: stamp(), guardian: p.kind === 'family' });
+      const parent = p.kind === 'family' && (p.holder ?? 'parent') === 'parent';
+      if (parent && a.p_guardian !== true) return { error: 'guardian_required' };
+      Object.assign(p, { consent_version: consent, consent_at: stamp(), guardian: parent });
       return { ok: true };
     },
     update_my_profile(u, a) {
@@ -316,6 +421,15 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
         if (!['one', 'two'].includes(patch.backhand)) return { error: 'bad_backhand' };
         clean.backhand = patch.backhand;
       }
+      if ('level' in patch) {
+        if (!['beginner', 'intermediate', 'advanced', 'professional'].includes(patch.level)) return { error: 'bad_level' };
+        clean.level = patch.level;
+      }
+      if ('yearsPlaying' in patch) {
+        if (!['<1', '1-3', '3-5', '5+'].includes(patch.yearsPlaying)) return { error: 'bad_years' };
+        clean.yearsPlaying = patch.yearsPlaying;
+      }
+      if ('goals' in patch) clean.goals = String(patch.goals ?? '').trim().slice(0, 500);
       if ('aiConsent' in patch) {
         if (typeof patch.aiConsent !== 'boolean') return { error: 'bad_consent' };
         clean.aiConsent = patch.aiConsent;
@@ -408,6 +522,18 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
         row.closed_by = kind;
       }
       return { status: 'removed' };
+    },
+    my_connections_v3(u) {
+      return rpc.my_connections(u).map((c) => {
+        const p = byUsername(c.username);
+        return {
+          ...c,
+          holder: p?.holder ?? null,
+          verified: p?.verified === true,
+          club: p?.kind === 'coach' ? p.details?.club ?? null : null,
+          city: p?.kind === 'coach' ? p.details?.city ?? null : null,
+        };
+      });
     },
     my_connections_v2(u) {
       return rpc.my_connections(u).map((c) => ({ ...c, verified: byUsername(c.username)?.verified === true }));
@@ -519,6 +645,9 @@ export function startMockSupabase(port = 4300, ownerEmail = 'owner@example.com')
       if (a.p_blocked != null) p.blocked = !!a.p_blocked;
       if (a.p_verified != null) p.verified = !!a.p_verified;
       return { ok: true };
+    },
+    admin_profiles_v3(u) {
+      return rpc.admin_profiles(u).map((p) => ({ ...p, holder: p.holder ?? null, staff: staff.has(p.user_id) }));
     },
     admin_profiles_v2(u) {
       return rpc.admin_profiles(u).map((p) => ({ ...p, staff: staff.has(p.user_id) }));

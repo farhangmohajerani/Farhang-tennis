@@ -7,11 +7,11 @@ import { useStore } from '../lib/store';
 import { formatNum } from '../lib/i18n';
 import { navigate } from '../lib/router';
 import { plansForPlayer, primaryPlan } from '../lib/reducer';
-import { getSocial } from '../lib/social';
+import { getSocial, profileProgress } from '../lib/social';
 import { enablePush } from '../lib/push';
 import type { Match, Plan } from '../types';
 import { Button, Card, cx, Modal } from './ui';
-import { MyUsername, useMe, useSocialState } from './Social';
+import { useMe, useSocialState } from './Social';
 import { InstallGuide, usePushState } from './Settings';
 import { scoreLine } from './MatchBits';
 
@@ -81,9 +81,9 @@ export function PlanSwitcher({ plans, plan, choose, dark }: { plans: Plan[]; pla
 }
 
 /* ---- first-run guide ---- */
-type Step = { title: string; text: string; done: boolean };
+type Step = { title: string; text: string; done: boolean; action?: { label: string; to: string } };
 
-/** Three steps for a new family or coach; hidden once done or dismissed. */
+/** Three steps for a new account (player, family or coach); hidden once done or dismissed. */
 export function Guide() {
   const { state, t, lang, adapter } = useStore();
   const me = useMe();
@@ -93,26 +93,38 @@ export function Guide() {
   const [hidden, setHidden] = useState(() => readJson<boolean>(key, false));
   if (!me || hidden || conns === null) return null;
   const connected = conns.some((c) => c.status === 'accepted');
+  const own = state.players.find((p) => p.id === adapter.myId) ?? null;
+  const prog = profileProgress(me, own);
+  const profileDone = prog.done === prog.total;
+  const profileStep: Step = {
+    title: t('guideProfile'),
+    text: t(me.kind === 'coach' ? 'guideProfileTextCoach' : 'guideProfileText'),
+    done: profileDone,
+    action: { label: t('completeProfileBtn'), to: 'profile' },
+  };
   const steps: Step[] =
     me.kind === 'family'
       ? [
-          { title: t('guideF1'), text: t('guideF1Text', { u: me.username }), done: connected },
-          { title: t('guideF2'), text: t('guideF2Text'), done: push === 'on' || push === 'unsupported' || !me.notifyLive },
-          { title: t('guideF3'), text: t('guideF3Text'), done: state.matches.length > 0 || state.logs.length > 0 },
+          profileStep,
+          { title: t('guideF1'), text: t('guideF1Text'), done: connected },
+          me.holder === 'player'
+            ? { title: t('guideF3'), text: t('guideF3Text'), done: state.matches.length > 0 || state.logs.length > 0 }
+            : { title: t('guideF2'), text: t('guideF2Text'), done: push === 'on' || push === 'unsupported' || !me.notifyLive },
         ]
       : [
-          { title: t('guideC1'), text: t('guideC1Text', { u: me.username }), done: state.players.length > 0 },
+          profileStep,
+          { title: t('guideC1'), text: t('guideC1Text'), done: state.players.length > 0 },
           { title: t('guideC2'), text: t('guideC2Text'), done: state.plans.some((p) => p.owner === 'coach') },
-          { title: t('guideC3'), text: t('guideC3Text'), done: state.matches.length > 0 },
         ];
   const doneN = steps.filter((s) => s.done).length;
   if (doneN === steps.length) return null;
+  const next = steps.find((s) => !s.done);
   return (
     <Card className="mb-5 p-5" data-testid="guide">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <p className="eyebrow">{t('guideEyebrow', { n: doneN, total: steps.length })}</p>
-          <h2 className="font-display text-2xl leading-tight">{t(me.kind === 'family' ? 'guideTitleFamily' : 'guideTitleCoach')}</h2>
+          <h2 className="font-display text-2xl leading-tight">{t(me.kind === 'coach' ? 'guideTitleCoach' : 'guideTitleFamily')}</h2>
         </div>
         <button
           type="button"
@@ -143,15 +155,15 @@ export function Guide() {
             <div className="min-w-0">
               <p className={cx('font-semibold', s.done && 'text-muted line-through decoration-1')}>{s.title}</p>
               {!s.done && <p className="text-[13.5px] text-muted">{s.text}</p>}
+              {!s.done && s === next && s.action && (
+                <a href={`#${s.action.to}`} className="mt-2 inline-flex h-10 items-center rounded-full bg-accent px-4 text-sm font-semibold text-accent-ink" data-testid="guide-action">
+                  {s.action.label} →
+                </a>
+              )}
             </div>
           </li>
         ))}
       </ol>
-      {me.kind === 'family' && !connected && (
-        <div className="mt-3">
-          <MyUsername />
-        </div>
-      )}
     </Card>
   );
 }
@@ -167,7 +179,8 @@ export function NotifyPrompt() {
   const key = `tennis-progress:notify-asked:${adapter.myId ?? ''}`;
   const [asked, setAsked] = useState(() => readJson<boolean>(key, false));
   const [busy, setBusy] = useState(false);
-  if (!me || !social || me.kind !== 'family' || asked || !me.notifyLive) return null;
+  // Parents want to know when their child's match starts; a player holding their own account is on court.
+  if (!me || !social || me.kind !== 'family' || me.holder === 'player' || asked || !me.notifyLive) return null;
   if (!(conns ?? []).some((c) => c.status === 'accepted')) return null;
   if (push !== 'off' && push !== 'install') return null;
   const player = state.players.find((p) => p.id === adapter.myId)?.name || me.displayName;
@@ -243,7 +256,8 @@ export function LiveAlert({ route }: { route: string }) {
   const myId = adapter.myId;
   const now = Date.now();
   // The family's own player, or players this coach is connected to (not everyone the admin can see).
-  const follows = (pid: string) => (me.kind === 'family' ? pid === myId : (conns ?? []).some((c) => c.status === 'accepted' && c.playerId === pid));
+  const follows = (pid: string) =>
+    me.kind === 'family' ? pid === myId && me.holder !== 'player' : (conns ?? []).some((c) => c.status === 'accepted' && c.playerId === pid);
   const m: Match | undefined = state.matches.find(
     (x) =>
       x.status === 'live' &&
